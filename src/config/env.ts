@@ -16,8 +16,8 @@ export const config = {
   telegramBotToken: getEnvVar('TELEGRAM_BOT_TOKEN'),
   webhookUrl: getEnvVar('WEBHOOK_URL', false),
 
-  // Google Gemini
-  geminiApiKey: getEnvVar('GEMINI_API_KEY'),
+  // OpenRouter API (for AI models)
+  openRouterApiKey: getEnvVar('OPENROUTER_API_KEY'),
 
   // Groq (for Whisper) - optional, voice transcription disabled if not set
   groqApiKey: getEnvVar('GROQ_API_KEY', false),
