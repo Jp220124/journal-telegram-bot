@@ -24,7 +24,26 @@ export async function sendMessage(
       parse_mode: 'Markdown',
       ...options,
     });
-  } catch (error) {
+  } catch (error: unknown) {
+    // If Markdown parsing fails, retry without formatting
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    if (errorMessage.includes("can't parse entities") || errorMessage.includes('parse')) {
+      console.log('[Telegram] Markdown parsing failed, retrying without formatting');
+      try {
+        // Remove Markdown formatting and send as plain text
+        const plainText = text
+          .replace(/\*/g, '')      // Remove bold markers
+          .replace(/_/g, '')       // Remove italic markers
+          .replace(/`/g, '');      // Remove code markers
+        return await bot.sendMessage(chatId, plainText, {
+          ...options,
+          parse_mode: undefined,
+        });
+      } catch (retryError) {
+        console.error('Error sending plain text message:', retryError);
+        return null;
+      }
+    }
     console.error('Error sending message:', error);
     return null;
   }
