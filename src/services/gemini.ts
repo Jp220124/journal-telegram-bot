@@ -6,7 +6,7 @@
 import { config } from '../config/env.js';
 
 const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
-const MODEL = 'google/gemini-2.0-flash-exp:free';
+const MODEL = 'meta-llama/llama-3.2-3b-instruct:free';
 
 // Intent tool definitions for OpenAI-compatible function calling
 const INTENT_TOOLS = [
