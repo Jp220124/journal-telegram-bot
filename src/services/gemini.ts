@@ -6,7 +6,7 @@
 import { config } from '../config/env.js';
 
 const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
-const MODEL = 'meta-llama/llama-3.2-3b-instruct:free';
+const MODEL = 'nex-agi/deepseek-v3.1-nex-n1:free';
 
 // Intent tool definitions for OpenAI-compatible function calling
 const INTENT_TOOLS = [
