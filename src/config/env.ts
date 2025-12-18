@@ -19,8 +19,8 @@ export const config = {
   // Google Gemini
   geminiApiKey: getEnvVar('GEMINI_API_KEY'),
 
-  // Groq (for Whisper)
-  groqApiKey: getEnvVar('GROQ_API_KEY'),
+  // Groq (for Whisper) - optional, voice transcription disabled if not set
+  groqApiKey: getEnvVar('GROQ_API_KEY', false),
 
   // Supabase
   supabaseUrl: getEnvVar('SUPABASE_URL'),

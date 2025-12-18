@@ -8,6 +8,7 @@ import { transcribeAudio } from '../services/groq.js';
 import { parseIntent } from '../services/gemini.js';
 import { findIntegrationByChatId, saveMessageHistory, getRecentMessages } from '../services/supabase.js';
 import { handleTextMessage } from './message.js';
+import { config } from '../config/env.js';
 
 /**
  * Handle incoming voice message
@@ -17,6 +18,16 @@ export async function handleVoiceMessage(msg: TelegramBot.Message): Promise<void
   const voice = msg.voice;
 
   if (!voice) return;
+
+  // Check if voice transcription is enabled
+  if (!config.groqApiKey) {
+    await sendMessage(
+      chatId,
+      "🎤 Voice messages are not currently enabled.\n\n" +
+        'Please send a text message instead.'
+    );
+    return;
+  }
 
   // Check if user is linked
   const integration = await findIntegrationByChatId(chatId);
