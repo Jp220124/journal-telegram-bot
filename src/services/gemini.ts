@@ -193,6 +193,13 @@ export async function parseIntent(
 Current date: ${todayStr}
 Tomorrow: ${tomorrowStr}
 
+CRITICAL INSTRUCTION: When extracting parameters (especially task titles, journal content), you MUST use the content from the CURRENT/LATEST user message ONLY. Previous messages in the conversation are provided for context about what actions were taken, but NEVER extract titles or content from previous messages.
+
+For add_todo:
+- The "title" parameter MUST come from the CURRENT user message
+- Extract exactly what the user wants to add as a task from their LATEST message
+- Do NOT use task names from previous messages in the conversation
+
 When parsing dates:
 - "today" = ${todayStr}
 - "tomorrow" = ${tomorrowStr}
@@ -211,7 +218,7 @@ For priorities:
 - Words like "whenever", "low priority", "not urgent" = low
 - Default to medium if not specified
 
-Analyze the user's message and call the most appropriate function.`;
+Analyze the user's CURRENT message and call the most appropriate function.`;
 
   try {
     // Build messages array
@@ -246,6 +253,14 @@ Analyze the user's message and call the most appropriate function.`;
       } catch {
         args = {};
       }
+
+      // Debug logging to track AI extraction
+      console.log('[AI Intent Debug]', {
+        userMessage: userMessage,
+        extractedIntent: functionName,
+        extractedParams: args,
+        contextLength: context?.length || 0,
+      });
 
       return {
         intent: functionName as ParsedIntent['intent'],

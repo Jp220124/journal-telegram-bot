@@ -170,6 +170,16 @@ export async function addTodo(
     notes?: string;
   }
 ): Promise<Todo | null> {
+  // Debug logging before insert
+  console.log('[DB Insert Debug] Attempting to add todo:', {
+    userId,
+    title,
+    priority: options?.priority || 'medium',
+    due_date: options?.due_date || null,
+    due_time: options?.due_time || null,
+    category: options?.category || null,
+  });
+
   const { data, error } = await supabase
     .from('todos')
     .insert({
@@ -185,9 +195,16 @@ export async function addTodo(
     .single();
 
   if (error) {
-    console.error('Error adding todo:', error);
+    console.error('[DB Insert Error] Error adding todo:', error);
     return null;
   }
+
+  // Debug logging after successful insert
+  console.log('[DB Insert Success] Todo created:', {
+    id: data.id,
+    title: data.title,
+    user_id: data.user_id,
+  });
 
   return data as Todo;
 }
