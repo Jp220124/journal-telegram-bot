@@ -235,12 +235,31 @@ export async function parseIntent(
 Current date: ${todayStr}
 Tomorrow: ${tomorrowStr}
 
-CRITICAL INSTRUCTION: When extracting parameters (especially task titles, journal content), you MUST use the content from the CURRENT/LATEST user message ONLY. Previous messages in the conversation are provided for context about what actions were taken, but NEVER extract titles or content from previous messages.
+CRITICAL: CATEGORY EXTRACTION RULES
+The app has these categories: Daily Recurring, One-Time Tasks, Work, Personal
+
+When user mentions a category using phrases like "to [category]", "in [category]", "for [category]", "under [category]":
+- "to work" / "in work" / "for work" → category: "Work"
+- "to personal" / "in personal" / "for personal" → category: "Personal"
+- "to daily" / "to daily recurring" → category: "Daily Recurring"
+- "to one-time" / "one time task" → category: "One-Time Tasks"
+
+CRITICAL: PARSING EXAMPLES
+- "Add task to work" → title: (empty), category: "Work"
+- "Add HR App to work" → title: "HR App", category: "Work"
+- "Add task - HR App to work" → title: "HR App", category: "Work"
+- "Add buy groceries to personal" → title: "buy groceries", category: "Personal"
+- "Add task to daily recurring" → title: (empty), category: "Daily Recurring"
+- "Add exercise to daily" → title: "exercise", category: "Daily Recurring"
+
+The phrase "to [category]" at the END of the message indicates the category, NOT part of the title!
+If user says "Add task to work" - the title is EMPTY and category is "Work".
+If user says "Add HR App to work" - the title is "HR App" and category is "Work".
 
 For add_todo:
-- The "title" parameter MUST come from the CURRENT user message
-- Extract exactly what the user wants to add as a task from their LATEST message
-- Do NOT use task names from previous messages in the conversation
+- Extract the task title (what comes between "add" and "to [category]")
+- Extract category from "to [category]" phrase at end
+- If only category is mentioned with no specific task, leave title empty
 
 When parsing dates:
 - "today" = ${todayStr}
