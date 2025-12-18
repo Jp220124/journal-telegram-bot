@@ -65,6 +65,33 @@ export interface MessageHistory {
   created_at: string;
 }
 
+export interface Note {
+  id: string;
+  user_id: string;
+  title: string;
+  content: Record<string, unknown>; // TipTap JSON content
+  content_text: string; // Plain text for search
+  folder_id: string | null;
+  is_pinned: boolean;
+  is_archived: boolean;
+  word_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface NoteFolder {
+  id: string;
+  user_id: string;
+  name: string;
+  icon: string;
+  color: string;
+  parent_id: string | null;
+  order_index: number;
+  is_default: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
 // Create Supabase client with service role key
 const supabase = createClient(config.supabaseUrl, config.supabaseServiceKey, {
   auth: {
@@ -462,6 +489,285 @@ export async function markNotificationFailed(notificationId: string, errorMessag
   if (error) {
     console.error('Error marking notification failed:', error);
   }
+}
+
+// =====================================================
+// Notes Functions
+// =====================================================
+
+/**
+ * Helper to create TipTap JSON content from plain text
+ */
+function createTipTapContent(text: string): Record<string, unknown> {
+  // Split text into paragraphs
+  const paragraphs = text.split('\n').filter((p) => p.trim());
+
+  if (paragraphs.length === 0) {
+    return {
+      type: 'doc',
+      content: [{ type: 'paragraph' }],
+    };
+  }
+
+  return {
+    type: 'doc',
+    content: paragraphs.map((p) => ({
+      type: 'paragraph',
+      content: [{ type: 'text', text: p }],
+    })),
+  };
+}
+
+/**
+ * Count words in text
+ */
+function countWords(text: string): number {
+  return text
+    .trim()
+    .split(/\s+/)
+    .filter((w) => w.length > 0).length;
+}
+
+/**
+ * Get user's note folders
+ */
+export async function getUserFolders(userId: string): Promise<NoteFolder[]> {
+  const { data, error } = await supabase
+    .from('note_folders')
+    .select('*')
+    .eq('user_id', userId)
+    .order('order_index', { ascending: true });
+
+  if (error) {
+    console.error('Error fetching note folders:', error);
+    return [];
+  }
+
+  return data as NoteFolder[];
+}
+
+/**
+ * Find a folder by name (case-insensitive)
+ */
+export async function getFolderByName(userId: string, folderName: string): Promise<NoteFolder | null> {
+  const { data, error } = await supabase
+    .from('note_folders')
+    .select('*')
+    .eq('user_id', userId)
+    .ilike('name', folderName)
+    .single();
+
+  if (error) {
+    console.log('[Folder Lookup] Folder not found:', { folderName, error: error.message });
+    return null;
+  }
+
+  return data as NoteFolder;
+}
+
+/**
+ * Get user's recent notes
+ */
+export async function getUserNotes(
+  userId: string,
+  options?: {
+    folderId?: string | null;
+    limit?: number;
+  }
+): Promise<Note[]> {
+  let query = supabase
+    .from('notes')
+    .select('*')
+    .eq('user_id', userId)
+    .eq('is_archived', false)
+    .order('is_pinned', { ascending: false })
+    .order('updated_at', { ascending: false });
+
+  if (options?.folderId !== undefined) {
+    if (options.folderId === null) {
+      query = query.is('folder_id', null);
+    } else {
+      query = query.eq('folder_id', options.folderId);
+    }
+  }
+
+  const { data, error } = await query.limit(options?.limit || 10);
+
+  if (error) {
+    console.error('Error fetching notes:', error);
+    return [];
+  }
+
+  return data as Note[];
+}
+
+/**
+ * Search notes by title or content
+ */
+export async function searchNotes(userId: string, searchQuery: string, limit: number = 10): Promise<Note[]> {
+  // Try using the RPC function first if it exists
+  const { data: rpcData, error: rpcError } = await supabase.rpc('search_notes', {
+    p_user_id: userId,
+    p_query: searchQuery,
+    p_limit: limit,
+    p_offset: 0,
+  });
+
+  if (!rpcError && rpcData) {
+    return rpcData as Note[];
+  }
+
+  // Fallback to simple ILIKE search
+  console.log('[Notes Search] RPC failed, using fallback:', rpcError?.message);
+
+  const { data, error } = await supabase
+    .from('notes')
+    .select('*')
+    .eq('user_id', userId)
+    .eq('is_archived', false)
+    .or(`title.ilike.%${searchQuery}%,content_text.ilike.%${searchQuery}%`)
+    .order('updated_at', { ascending: false })
+    .limit(limit);
+
+  if (error) {
+    console.error('Error searching notes:', error);
+    return [];
+  }
+
+  return data as Note[];
+}
+
+/**
+ * Find a note by title (case-insensitive, partial match)
+ */
+export async function getNoteByTitle(
+  userId: string,
+  title: string
+): Promise<{ success: boolean; note?: Note; notes?: Note[]; message: string }> {
+  const { data, error } = await supabase
+    .from('notes')
+    .select('*')
+    .eq('user_id', userId)
+    .eq('is_archived', false)
+    .ilike('title', `%${title}%`)
+    .limit(5);
+
+  if (error) {
+    console.error('Error finding note:', error);
+    return { success: false, message: 'Error searching for note' };
+  }
+
+  if (!data || data.length === 0) {
+    return { success: false, message: `No note found matching "${title}"` };
+  }
+
+  if (data.length === 1) {
+    return { success: true, note: data[0] as Note, message: 'Note found' };
+  }
+
+  // Multiple matches
+  return {
+    success: false,
+    notes: data as Note[],
+    message: `Multiple notes found. Please be more specific:\n${data.map((n) => `- ${n.title}`).join('\n')}`,
+  };
+}
+
+/**
+ * Create a new note
+ */
+export async function addNote(
+  userId: string,
+  title: string,
+  content: string,
+  options?: {
+    folderId?: string;
+    folderName?: string;
+  }
+): Promise<Note | null> {
+  // Look up folder by name if provided
+  let folderId: string | null = options?.folderId || null;
+  if (!folderId && options?.folderName) {
+    const folder = await getFolderByName(userId, options.folderName);
+    if (folder) {
+      folderId = folder.id;
+    }
+  }
+
+  const tipTapContent = createTipTapContent(content);
+  const wordCount = countWords(content);
+
+  console.log('[Note Create] Adding note:', {
+    userId,
+    title,
+    contentPreview: content.substring(0, 50) + '...',
+    folderId,
+    wordCount,
+  });
+
+  const { data, error } = await supabase
+    .from('notes')
+    .insert({
+      user_id: userId,
+      title,
+      content: tipTapContent,
+      content_text: content,
+      folder_id: folderId,
+      is_pinned: false,
+      is_archived: false,
+      word_count: wordCount,
+    })
+    .select()
+    .single();
+
+  if (error) {
+    console.error('[Note Create Error]:', error);
+    return null;
+  }
+
+  console.log('[Note Create Success]:', { id: data.id, title: data.title });
+  return data as Note;
+}
+
+/**
+ * Append content to an existing note
+ */
+export async function appendToNote(noteId: string, additionalContent: string): Promise<Note | null> {
+  // First get the existing note
+  const { data: existing, error: fetchError } = await supabase
+    .from('notes')
+    .select('*')
+    .eq('id', noteId)
+    .single();
+
+  if (fetchError || !existing) {
+    console.error('Error fetching note to append:', fetchError);
+    return null;
+  }
+
+  // Combine content
+  const newContentText = existing.content_text + '\n\n' + additionalContent;
+  const newTipTapContent = createTipTapContent(newContentText);
+  const newWordCount = countWords(newContentText);
+
+  const { data, error } = await supabase
+    .from('notes')
+    .update({
+      content: newTipTapContent,
+      content_text: newContentText,
+      word_count: newWordCount,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', noteId)
+    .select()
+    .single();
+
+  if (error) {
+    console.error('Error appending to note:', error);
+    return null;
+  }
+
+  return data as Note;
 }
 
 export { supabase };

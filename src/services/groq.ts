@@ -15,8 +15,8 @@ const groq = new Groq({
  */
 export async function transcribeAudio(audioBuffer: Buffer, filename: string = 'audio.ogg'): Promise<string | null> {
   try {
-    // Create a File-like object from the buffer
-    const file = new File([audioBuffer], filename, { type: 'audio/ogg' });
+    // Create a File-like object from the buffer (convert to Uint8Array for type compatibility)
+    const file = new File([new Uint8Array(audioBuffer)], filename, { type: 'audio/ogg' });
 
     const transcription = await groq.audio.transcriptions.create({
       file,
@@ -44,7 +44,7 @@ export async function transcribeAudioWithOptions(
   }
 ): Promise<{ text: string | null; duration?: number }> {
   try {
-    const file = new File([audioBuffer], options?.filename || 'audio.ogg', { type: 'audio/ogg' });
+    const file = new File([new Uint8Array(audioBuffer)], options?.filename || 'audio.ogg', { type: 'audio/ogg' });
 
     const transcription = await groq.audio.transcriptions.create({
       file,

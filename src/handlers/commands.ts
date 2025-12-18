@@ -27,6 +27,7 @@ export async function handleStart(msg: TelegramBot.Message): Promise<void> {
         '✅ *Complete Tasks*\n"Done with groceries"\n\n' +
         '📋 *View Tasks*\n"What are my tasks?"\n\n' +
         '📓 *Journal*\n"Journal: Had a great day today"\n\n' +
+        '📄 *Notes*\n"Create a note about project ideas"\n\n' +
         'Just send me a message and I\'ll understand!'
     );
     return;
@@ -39,6 +40,7 @@ export async function handleStart(msg: TelegramBot.Message): Promise<void> {
       "I'm your Journal & Todo Assistant. I can help you:\n\n" +
       '• Add tasks via chat or voice\n' +
       '• Log journal entries\n' +
+      '• Create and manage notes\n' +
       '• Get reminders when tasks are due\n\n' +
       '*To get started, link your account:*\n\n' +
       '1. Open your Daily Journal web app\n' +
@@ -118,14 +120,22 @@ export async function handleHelp(msg: TelegramBot.Message): Promise<void> {
       '/help - Show this help\n' +
       '/link CODE - Link your account\n' +
       '/tasks - Show your tasks\n' +
-      '/today - Show today\'s tasks\n\n' +
+      '/today - Show today\'s tasks\n' +
+      '/mynotes - Show your notes\n' +
+      '/newnote - Create a new note\n\n' +
       '*Natural Language:*\n' +
       'Just type naturally! Examples:\n\n' +
+      '*Tasks:*\n' +
       '• "Add meeting with John tomorrow 3pm"\n' +
       '• "Remind me to buy milk"\n' +
       '• "High priority: finish report"\n' +
       '• "What do I need to do today?"\n' +
-      '• "Done with the report"\n' +
+      '• "Done with the report"\n\n' +
+      '*Notes:*\n' +
+      '• "Create a note about project ideas"\n' +
+      '• "Show my notes"\n' +
+      '• "Read my note about meeting"\n\n' +
+      '*Journal:*\n' +
       '• "Journal: Felt productive today"\n\n' +
       '*Voice Messages:*\n' +
       'Send a voice message and I\'ll transcribe it!\n\n' +
@@ -184,5 +194,49 @@ export async function handleUnlink(msg: TelegramBot.Message): Promise<void> {
         { text: '❌ Cancel', callback_data: 'cancel_unlink' },
       ],
     ]
+  );
+}
+
+/**
+ * Handle /mynotes command - Show user's notes
+ */
+export async function handleNotes(msg: TelegramBot.Message): Promise<void> {
+  const chatId = msg.chat.id.toString();
+
+  const integration = await findIntegrationByChatId(chatId);
+  if (!integration) {
+    await sendMessage(chatId, 'Please link your account first with /link YOUR_CODE');
+    return;
+  }
+
+  // Import here to avoid circular dependency
+  const { executeQueryNotes } = await import('./message.js');
+  const response = await executeQueryNotes(chatId, integration.user_id, {});
+  await sendMessage(chatId, response);
+}
+
+/**
+ * Handle /newnote command - Start creating a new note
+ */
+export async function handleNewNote(msg: TelegramBot.Message): Promise<void> {
+  const chatId = msg.chat.id.toString();
+
+  const integration = await findIntegrationByChatId(chatId);
+  if (!integration) {
+    await sendMessage(chatId, 'Please link your account first with /link YOUR_CODE');
+    return;
+  }
+
+  // Import here to avoid circular dependency
+  const { setState } = await import('../services/conversationState.js');
+
+  // Set state to awaiting note title
+  setState(chatId, 'AWAITING_NOTE_TITLE', undefined, undefined, {});
+
+  await sendMessage(
+    chatId,
+    '📝 *Create a new note*\n\n' +
+      'What would you like to name this note?\n\n' +
+      '_Send the note title, or /cancel to abort._'
   );
 }

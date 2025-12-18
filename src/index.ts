@@ -4,6 +4,7 @@
  * Features:
  * - Add todos via chat or voice
  * - Add journal entries
+ * - Create and manage notes
  * - Query and complete tasks
  * - Due date reminders
  *
@@ -22,7 +23,7 @@ import healthRouter from './routes/health.js';
 import webhookRouter from './routes/webhook.js';
 
 // Import handlers
-import { handleStart, handleLink, handleHelp, handleTasks, handleToday, handleUnlink } from './handlers/commands.js';
+import { handleStart, handleLink, handleHelp, handleTasks, handleToday, handleUnlink, handleNotes, handleNewNote } from './handlers/commands.js';
 import { handleTextMessage } from './handlers/message.js';
 import { handleVoiceMessage } from './handlers/voice.js';
 
@@ -47,6 +48,8 @@ bot.onText(/^\/link$/, (msg) => handleLink(msg));
 bot.onText(/^\/tasks$/, handleTasks);
 bot.onText(/^\/today$/, handleToday);
 bot.onText(/^\/unlink$/, handleUnlink);
+bot.onText(/^\/mynotes$/, handleNotes);
+bot.onText(/^\/newnote$/, handleNewNote);
 
 // Handle text messages (non-commands)
 bot.on('message', async (msg) => {

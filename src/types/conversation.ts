@@ -7,6 +7,8 @@ export type ConversationStateType =
   | 'AWAITING_TODO_TITLE'
   | 'AWAITING_TODO_DETAILS'
   | 'AWAITING_JOURNAL_CONTENT'
+  | 'AWAITING_NOTE_TITLE'
+  | 'AWAITING_NOTE_CONTENT'
   | 'CHATTING';
 
 export interface PendingTodoData {
@@ -22,10 +24,18 @@ export interface PendingJournalData {
   date?: string;
 }
 
+export interface PendingNoteData {
+  title?: string;
+  content?: string;
+  folder_id?: string;
+  folder_name?: string;
+}
+
 export interface ConversationState {
   state: ConversationStateType;
   pendingTodo: PendingTodoData;
   pendingJournal: PendingJournalData;
+  pendingNote: PendingNoteData;
   lastUpdated: number; // timestamp
   expiresAt: number; // timestamp
 }
@@ -34,6 +44,7 @@ export const DEFAULT_STATE: ConversationState = {
   state: 'IDLE',
   pendingTodo: {},
   pendingJournal: {},
+  pendingNote: {},
   lastUpdated: Date.now(),
   expiresAt: Date.now() + 5 * 60 * 1000, // 5 minutes
 };

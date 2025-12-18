@@ -9,6 +9,7 @@ import {
   ConversationStateType,
   PendingTodoData,
   PendingJournalData,
+  PendingNoteData,
   DEFAULT_STATE,
 } from '../types/conversation.js';
 
@@ -48,7 +49,8 @@ export function setState(
   chatId: string,
   newState: ConversationStateType,
   pendingTodo?: Partial<PendingTodoData>,
-  pendingJournal?: Partial<PendingJournalData>
+  pendingJournal?: Partial<PendingJournalData>,
+  pendingNote?: Partial<PendingNoteData>
 ): ConversationState {
   const currentState = getState(chatId);
   const now = Date.now();
@@ -63,6 +65,10 @@ export function setState(
       ...currentState.pendingJournal,
       ...pendingJournal,
     },
+    pendingNote: {
+      ...currentState.pendingNote,
+      ...pendingNote,
+    },
     lastUpdated: now,
     expiresAt: now + STATE_EXPIRATION_MS,
   };
@@ -72,6 +78,7 @@ export function setState(
     state: newState,
     pendingTodo: updatedState.pendingTodo,
     pendingJournal: updatedState.pendingJournal,
+    pendingNote: updatedState.pendingNote,
   });
 
   return updatedState;
@@ -118,6 +125,8 @@ export function getStateDescription(state: ConversationStateType): string {
     AWAITING_TODO_TITLE: 'Waiting for task title',
     AWAITING_TODO_DETAILS: 'Waiting for task details',
     AWAITING_JOURNAL_CONTENT: 'Waiting for journal content',
+    AWAITING_NOTE_TITLE: 'Waiting for note title',
+    AWAITING_NOTE_CONTENT: 'Waiting for note content',
     CHATTING: 'In conversation',
   };
   return descriptions[state];

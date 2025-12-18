@@ -101,6 +101,68 @@ const INTENT_TOOLS = [
   {
     type: 'function' as const,
     function: {
+      name: 'add_note',
+      description: 'Create a new note for the user. Use this when the user wants to write a note, save some information, or create a document. Notes are different from todos (tasks) - they are for storing information, ideas, or longer text content.',
+      parameters: {
+        type: 'object',
+        properties: {
+          title: {
+            type: 'string',
+            description: 'The title of the note. If not provided, will be asked.',
+          },
+          content: {
+            type: 'string',
+            description: 'The content/body of the note. This is the main text.',
+          },
+          folder: {
+            type: 'string',
+            description: 'The folder to save the note in (e.g., "Personal", "Work", "Ideas"). If not specified, leave empty.',
+          },
+        },
+        required: [], // No required fields - allows partial intents
+      },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'query_notes',
+      description: "Get/list/search user's notes. Use this when the user wants to see their notes, find a specific note, or search through their notes.",
+      parameters: {
+        type: 'object',
+        properties: {
+          search_query: {
+            type: 'string',
+            description: 'Search term to filter notes by title or content. Leave empty to list recent notes.',
+          },
+          folder: {
+            type: 'string',
+            description: 'Filter notes by folder name. Leave empty for all folders.',
+          },
+        },
+      },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'read_note',
+      description: 'Read/open a specific note to see its content. Use this when the user wants to see the full content of a particular note.',
+      parameters: {
+        type: 'object',
+        properties: {
+          note_title: {
+            type: 'string',
+            description: 'The title or partial title of the note to read.',
+          },
+        },
+        required: ['note_title'],
+      },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
       name: 'general_chat',
       description: "General conversation that doesn't match other intents. Use this for greetings, questions, or when the user is just chatting.",
       parameters: {
@@ -118,7 +180,7 @@ const INTENT_TOOLS = [
 ];
 
 export interface ParsedIntent {
-  intent: 'add_todo' | 'add_journal' | 'query_todos' | 'mark_complete' | 'general_chat';
+  intent: 'add_todo' | 'add_journal' | 'query_todos' | 'mark_complete' | 'add_note' | 'query_notes' | 'read_note' | 'general_chat';
   parameters: Record<string, string | undefined>;
   confidence: 'high' | 'medium' | 'low';
   isComplete: boolean; // Whether all required data is present for execution
@@ -381,7 +443,13 @@ Analyze the user's CURRENT message and call the most appropriate function.`;
         isComplete = !!args.content && args.content.trim().length > 0;
       } else if (functionName === 'mark_complete') {
         isComplete = !!args.task_identifier && args.task_identifier.trim().length > 0;
+      } else if (functionName === 'add_note') {
+        // A note needs at least a title to be complete
+        isComplete = !!args.title && args.title.trim().length > 0;
+      } else if (functionName === 'read_note') {
+        isComplete = !!args.note_title && args.note_title.trim().length > 0;
       }
+      // query_notes is always complete (can list recent notes without search)
 
       // Debug logging to track AI extraction
       console.log('[AI Intent Debug]', {
