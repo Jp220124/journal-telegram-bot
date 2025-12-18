@@ -210,7 +210,7 @@ Analyze the user's message and call the most appropriate function.`;
  */
 export async function generateResponse(prompt: string): Promise<string> {
   try {
-    const simpleModel = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+    const simpleModel = genAI.getGenerativeModel({ model: 'gemini-2.0-flash-exp' });
     const result = await simpleModel.generateContent(prompt);
     return result.response.text();
   } catch (error) {
