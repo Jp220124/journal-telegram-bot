@@ -164,6 +164,44 @@ function normalizeCategory(input: string | undefined): string | undefined {
   return undefined;
 }
 
+/**
+ * Extract category from title if AI didn't parse it correctly
+ * Handles patterns like "HR App to work" → { cleanTitle: "HR App", category: "Work" }
+ */
+function extractCategoryFromTitle(title: string): { cleanTitle: string; category: string | undefined } {
+  // Pattern: matches "to/in/for/under [category]" at the end of the title
+  const categoryPattern = /\s+(?:to|in|for|under)\s+(work|personal|daily(?:\s+recurring)?|one[- ]?time(?:\s+tasks)?)\s*$/i;
+
+  const match = title.match(categoryPattern);
+
+  if (match) {
+    const categoryText = match[1].toLowerCase();
+    const cleanTitle = title.replace(categoryPattern, '').trim();
+
+    // Map to exact category names
+    let category: string | undefined;
+    if (categoryText === 'work') {
+      category = 'Work';
+    } else if (categoryText === 'personal') {
+      category = 'Personal';
+    } else if (categoryText.startsWith('daily')) {
+      category = 'Daily Recurring';
+    } else if (categoryText.includes('one') && categoryText.includes('time')) {
+      category = 'One-Time Tasks';
+    }
+
+    console.log('[Category Extraction] Extracted from title:', {
+      originalTitle: title,
+      cleanTitle,
+      category
+    });
+
+    return { cleanTitle, category };
+  }
+
+  return { cleanTitle: title, category: undefined };
+}
+
 interface OpenRouterMessage {
   role: 'system' | 'user' | 'assistant';
   content: string;
@@ -322,6 +360,16 @@ Analyze the user's CURRENT message and call the most appropriate function.`;
           args.category = normalizedCategory;
         } else {
           delete args.category; // Remove invalid category
+        }
+      }
+
+      // POST-PROCESSING: Extract category from title if AI didn't parse it
+      // This handles cases like "HR App to work" where AI puts everything in title
+      if (functionName === 'add_todo' && args.title && !args.category) {
+        const extracted = extractCategoryFromTitle(args.title);
+        if (extracted.category) {
+          args.title = extracted.cleanTitle;
+          args.category = extracted.category;
         }
       }
 
