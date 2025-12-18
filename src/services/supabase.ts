@@ -15,7 +15,8 @@ export interface Todo {
   priority: 'low' | 'medium' | 'high';
   due_date: string | null;
   due_time: string | null;
-  category: string | null;
+  category: string | null;       // Legacy text field
+  category_id: string | null;    // UUID foreign key to task_categories
   notes: string | null;
   created_at: string;
   updated_at: string;
@@ -157,6 +158,27 @@ export async function getUserTodos(
 }
 
 /**
+ * Get category ID by name from task_categories table
+ * The Journal app uses category_id (UUID) not category (string)
+ */
+async function getCategoryIdByName(userId: string, categoryName: string): Promise<string | null> {
+  const { data, error } = await supabase
+    .from('task_categories')
+    .select('id')
+    .eq('user_id', userId)
+    .ilike('name', categoryName)  // Case-insensitive match
+    .single();
+
+  if (error) {
+    console.log('[Category Lookup] Category not found:', { categoryName, error: error.message });
+    return null;
+  }
+
+  console.log('[Category Lookup] Found category:', { categoryName, categoryId: data.id });
+  return data.id;
+}
+
+/**
  * Add a new todo
  */
 export async function addTodo(
@@ -170,6 +192,12 @@ export async function addTodo(
     notes?: string;
   }
 ): Promise<Todo | null> {
+  // Look up category_id if category name is provided
+  let categoryId: string | null = null;
+  if (options?.category) {
+    categoryId = await getCategoryIdByName(userId, options.category);
+  }
+
   // Debug logging before insert
   console.log('[DB Insert Debug] Attempting to add todo:', {
     userId,
@@ -178,6 +206,7 @@ export async function addTodo(
     due_date: options?.due_date || null,
     due_time: options?.due_time || null,
     category: options?.category || null,
+    category_id: categoryId,  // The actual UUID we're using
   });
 
   const { data, error } = await supabase
@@ -188,7 +217,7 @@ export async function addTodo(
       priority: options?.priority || 'medium',
       due_date: options?.due_date || null,
       due_time: options?.due_time || null,
-      category: options?.category || null,
+      category_id: categoryId,  // Use category_id (UUID) instead of category (string)
       notes: options?.notes || null,
     })
     .select()
@@ -199,11 +228,13 @@ export async function addTodo(
     return null;
   }
 
-  // Debug logging after successful insert
+  // Debug logging after successful insert - include category_id to verify it was saved
   console.log('[DB Insert Success] Todo created:', {
     id: data.id,
     title: data.title,
     user_id: data.user_id,
+    category_id: data.category_id,  // Check if category_id was actually saved
+    priority: data.priority,
   });
 
   return data as Todo;
