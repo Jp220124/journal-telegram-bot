@@ -6,7 +6,7 @@ import TelegramBot from 'node-telegram-bot-api';
 import { sendMessage, sendTypingAction, downloadVoiceFile } from '../services/telegram.js';
 import { transcribeAudio } from '../services/groq.js';
 import { parseIntent } from '../services/gemini.js';
-import { findIntegrationByChatId, saveMessageHistory, getRecentMessages } from '../services/supabase.js';
+import { findIntegrationByChatId, saveMessageHistory } from '../services/supabase.js';
 import { handleTextMessage } from './message.js';
 import { config } from '../config/env.js';
 
@@ -71,15 +71,9 @@ export async function handleVoiceMessage(msg: TelegramBot.Message): Promise<void
   // Process the transcribed text
   await sendTypingAction(chatId);
 
-  // Get recent messages for context
-  const recentMessages = await getRecentMessages(integration.user_id, 5);
-  const context: Array<{ role: 'user' | 'assistant'; content: string }> = recentMessages.map((m) => ({
-    role: (m.direction === 'inbound' ? 'user' : 'assistant') as 'user' | 'assistant',
-    content: m.original_content || m.transcription || '',
-  }));
-
-  // Parse intent
-  const intent = await parseIntent(transcription, context);
+  // Parse intent WITHOUT context - DeepSeek model gets confused by context
+  // and extracts titles from previous messages instead of current message
+  const intent = await parseIntent(transcription);
 
   // Execute the appropriate action
   const { executeIntent } = await import('./message.js');

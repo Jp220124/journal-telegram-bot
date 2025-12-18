@@ -12,7 +12,6 @@ import {
   markTodoComplete,
   addJournalContent,
   saveMessageHistory,
-  getRecentMessages,
 } from '../services/supabase.js';
 
 /**
@@ -40,15 +39,9 @@ export async function handleTextMessage(msg: TelegramBot.Message): Promise<void>
   // Show typing indicator
   await sendTypingAction(chatId);
 
-  // Get recent messages for context
-  const recentMessages = await getRecentMessages(integration.user_id, 5);
-  const context: Array<{ role: 'user' | 'assistant'; content: string }> = recentMessages.map((m) => ({
-    role: (m.direction === 'inbound' ? 'user' : 'assistant') as 'user' | 'assistant',
-    content: m.original_content || m.transcription || '',
-  }));
-
-  // Parse intent using Gemini
-  const intent = await parseIntent(text, context);
+  // Parse intent WITHOUT context - DeepSeek model gets confused by context
+  // and extracts titles from previous messages instead of current message
+  const intent = await parseIntent(text);
 
   // Execute the appropriate action
   let response: string;
