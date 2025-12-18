@@ -1,0 +1,30 @@
+# Render Blueprint for Journal Telegram Bot
+# Deploy using: https://dashboard.render.com/blueprints
+
+services:
+  - type: web
+    name: journal-telegram-bot
+    runtime: node
+    region: oregon # US West - good latency
+    plan: free
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3000
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false # Set manually in Render dashboard
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_KEY
+        sync: false
+      - key: WEBHOOK_URL
+        generateValue: true # Will be set to the service URL
+    healthCheckPath: /health
+    autoDeploy: true
