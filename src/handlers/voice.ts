@@ -62,8 +62,8 @@ export async function handleVoiceMessage(msg: TelegramBot.Message): Promise<void
 
   // Get recent messages for context
   const recentMessages = await getRecentMessages(integration.user_id, 5);
-  const context = recentMessages.map((m) => ({
-    role: m.direction === 'inbound' ? 'user' : 'assistant' as const,
+  const context: Array<{ role: 'user' | 'assistant'; content: string }> = recentMessages.map((m) => ({
+    role: (m.direction === 'inbound' ? 'user' : 'assistant') as 'user' | 'assistant',
     content: m.original_content || m.transcription || '',
   }));
 
