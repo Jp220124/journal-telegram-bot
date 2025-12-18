@@ -4,6 +4,7 @@
  */
 
 import { config } from '../config/env.js';
+import { AVAILABLE_CATEGORIES } from '../types/conversation.js';
 
 const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
 const MODEL = 'nex-agi/deepseek-v3.1-nex-n1:free';
@@ -14,13 +15,13 @@ const INTENT_TOOLS = [
     type: 'function' as const,
     function: {
       name: 'add_todo',
-      description: 'Add a new todo/task for the user. Use this when the user wants to create a task, add something to their list, or set a reminder for something to do.',
+      description: 'Add a new todo/task for the user. Use this when the user wants to create a task, add something to their list, or set a reminder for something to do. Call this even if the user only mentions a category without a specific task title.',
       parameters: {
         type: 'object',
         properties: {
           title: {
             type: 'string',
-            description: 'The title/description of the task',
+            description: 'The title/description of the task. Leave empty/undefined if user only mentions category without a specific task.',
           },
           priority: {
             type: 'string',
@@ -36,10 +37,10 @@ const INTENT_TOOLS = [
           },
           category: {
             type: 'string',
-            description: 'Task category like work, personal, health, shopping, etc.',
+            description: `Task category. MUST be one of these exact values: ${AVAILABLE_CATEGORIES.join(', ')}. Map user input: "daily recurring/daily/recurring" -> "Daily Recurring", "one-time/once" -> "One-Time Tasks", "work/office/job" -> "Work", "personal/home/life" -> "Personal". If no category mentioned, leave empty.`,
           },
         },
-        required: ['title'],
+        required: [], // No required fields - allows partial intents
       },
     },
   },
@@ -120,6 +121,47 @@ export interface ParsedIntent {
   intent: 'add_todo' | 'add_journal' | 'query_todos' | 'mark_complete' | 'general_chat';
   parameters: Record<string, string | undefined>;
   confidence: 'high' | 'medium' | 'low';
+  isComplete: boolean; // Whether all required data is present for execution
+}
+
+/**
+ * Normalize category input to exact database values
+ */
+function normalizeCategory(input: string | undefined): string | undefined {
+  if (!input) return undefined;
+
+  const normalized = input.toLowerCase().trim();
+
+  // Map common variations to exact category names
+  const categoryMap: Record<string, string> = {
+    'daily recurring': 'Daily Recurring',
+    'daily': 'Daily Recurring',
+    'recurring': 'Daily Recurring',
+    'one-time tasks': 'One-Time Tasks',
+    'one-time': 'One-Time Tasks',
+    'one time': 'One-Time Tasks',
+    'once': 'One-Time Tasks',
+    'work': 'Work',
+    'office': 'Work',
+    'job': 'Work',
+    'personal': 'Personal',
+    'home': 'Personal',
+    'life': 'Personal',
+  };
+
+  // Check direct match first
+  if (categoryMap[normalized]) {
+    return categoryMap[normalized];
+  }
+
+  // Check if it's already a valid category (case-insensitive)
+  for (const cat of AVAILABLE_CATEGORIES) {
+    if (cat.toLowerCase() === normalized) {
+      return cat;
+    }
+  }
+
+  return undefined;
 }
 
 interface OpenRouterMessage {
@@ -254,11 +296,32 @@ Analyze the user's CURRENT message and call the most appropriate function.`;
         args = {};
       }
 
+      // Normalize category if present
+      if (args.category) {
+        const normalizedCategory = normalizeCategory(args.category);
+        if (normalizedCategory) {
+          args.category = normalizedCategory;
+        } else {
+          delete args.category; // Remove invalid category
+        }
+      }
+
+      // Determine if intent is complete (has all required data)
+      let isComplete = true;
+      if (functionName === 'add_todo') {
+        isComplete = !!args.title && args.title.trim().length > 0;
+      } else if (functionName === 'add_journal') {
+        isComplete = !!args.content && args.content.trim().length > 0;
+      } else if (functionName === 'mark_complete') {
+        isComplete = !!args.task_identifier && args.task_identifier.trim().length > 0;
+      }
+
       // Debug logging to track AI extraction
       console.log('[AI Intent Debug]', {
         userMessage: userMessage,
         extractedIntent: functionName,
         extractedParams: args,
+        isComplete,
         contextLength: context?.length || 0,
       });
 
@@ -266,6 +329,7 @@ Analyze the user's CURRENT message and call the most appropriate function.`;
         intent: functionName as ParsedIntent['intent'],
         parameters: args,
         confidence: 'high',
+        isComplete,
       };
     }
 
@@ -275,6 +339,7 @@ Analyze the user's CURRENT message and call the most appropriate function.`;
       intent: 'general_chat',
       parameters: { response: text || "I'm not sure how to help with that. You can ask me to add todos, write journal entries, or check your tasks!" },
       confidence: 'low',
+      isComplete: true, // General chat is always "complete"
     };
   } catch (error) {
     console.error('Error parsing intent with OpenRouter:', error);
@@ -282,6 +347,7 @@ Analyze the user's CURRENT message and call the most appropriate function.`;
       intent: 'general_chat',
       parameters: { response: 'Sorry, I had trouble understanding that. Could you try again?' },
       confidence: 'low',
+      isComplete: true,
     };
   }
 }
