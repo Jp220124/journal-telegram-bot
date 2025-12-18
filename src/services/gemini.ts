@@ -174,7 +174,7 @@ async function callOpenRouter(
     throw new Error(`OpenRouter API error: ${response.status} - ${error}`);
   }
 
-  return response.json();
+  return response.json() as Promise<OpenRouterResponse>;
 }
 
 /**
