@@ -7,7 +7,7 @@ import { config } from '../config/env.js';
 import { AVAILABLE_CATEGORIES } from '../types/conversation.js';
 
 const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
-const MODEL = 'qwen/qwen3-coder:free';
+const MODEL = 'kwaipilot/kat-coder-pro:free';
 
 // Intent tool definitions for OpenAI-compatible function calling
 const INTENT_TOOLS = [
