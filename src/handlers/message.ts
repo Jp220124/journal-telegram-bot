@@ -74,7 +74,7 @@ export async function handleTextMessage(msg: TelegramBot.Message): Promise<void>
 /**
  * Execute parsed intent
  */
-async function executeIntent(chatId: string, userId: string, intent: ParsedIntent): Promise<string> {
+export async function executeIntent(chatId: string, userId: string, intent: ParsedIntent): Promise<string> {
   switch (intent.intent) {
     case 'add_todo':
       return executeAddTodo(chatId, userId, intent.parameters);

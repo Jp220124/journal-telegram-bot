@@ -3,7 +3,7 @@
  * Uses function calling for structured output
  */
 
-import { GoogleGenerativeAI, FunctionDeclarationSchemaType, Tool } from '@google/generative-ai';
+import { GoogleGenerativeAI, SchemaType, Tool } from '@google/generative-ai';
 import { config } from '../config/env.js';
 
 const genAI = new GoogleGenerativeAI(config.geminiApiKey);
@@ -16,26 +16,26 @@ const INTENT_TOOLS: Tool[] = [
         name: 'add_todo',
         description: 'Add a new todo/task for the user. Use this when the user wants to create a task, add something to their list, or set a reminder for something to do.',
         parameters: {
-          type: FunctionDeclarationSchemaType.OBJECT,
+          type: SchemaType.OBJECT,
           properties: {
             title: {
-              type: FunctionDeclarationSchemaType.STRING,
+              type: SchemaType.STRING,
               description: 'The title/description of the task',
             },
             priority: {
-              type: FunctionDeclarationSchemaType.STRING,
+              type: SchemaType.STRING,
               description: 'Task priority level: low, medium, or high. Default to medium if not specified.',
             },
             due_date: {
-              type: FunctionDeclarationSchemaType.STRING,
+              type: SchemaType.STRING,
               description: 'Due date in YYYY-MM-DD format. Parse relative dates like "today", "tomorrow", "next Monday" to actual dates.',
             },
             due_time: {
-              type: FunctionDeclarationSchemaType.STRING,
+              type: SchemaType.STRING,
               description: 'Due time in HH:MM format (24-hour). Parse times like "5pm" to "17:00", "morning" to "09:00", etc.',
             },
             category: {
-              type: FunctionDeclarationSchemaType.STRING,
+              type: SchemaType.STRING,
               description: 'Task category like work, personal, health, shopping, etc.',
             },
           },
@@ -46,14 +46,14 @@ const INTENT_TOOLS: Tool[] = [
         name: 'add_journal',
         description: 'Add a journal entry for the user. Use this when the user wants to write in their journal, log their thoughts, reflect on their day, or record experiences.',
         parameters: {
-          type: FunctionDeclarationSchemaType.OBJECT,
+          type: SchemaType.OBJECT,
           properties: {
             content: {
-              type: FunctionDeclarationSchemaType.STRING,
+              type: SchemaType.STRING,
               description: 'The journal entry content',
             },
             mood: {
-              type: FunctionDeclarationSchemaType.STRING,
+              type: SchemaType.STRING,
               description: 'User\'s mood: great, good, okay, bad, or terrible',
             },
           },
@@ -64,10 +64,10 @@ const INTENT_TOOLS: Tool[] = [
         name: 'query_todos',
         description: 'Get/list user\'s todos. Use this when the user wants to see their tasks, check what they need to do, or review their list.',
         parameters: {
-          type: FunctionDeclarationSchemaType.OBJECT,
+          type: SchemaType.OBJECT,
           properties: {
             filter: {
-              type: FunctionDeclarationSchemaType.STRING,
+              type: SchemaType.STRING,
               description: 'Filter for todos: today (due today), pending (not completed), completed, all, or high_priority',
             },
           },
@@ -77,10 +77,10 @@ const INTENT_TOOLS: Tool[] = [
         name: 'mark_complete',
         description: 'Mark a todo as complete. Use this when the user says they finished a task, completed something, or did something on their list.',
         parameters: {
-          type: FunctionDeclarationSchemaType.OBJECT,
+          type: SchemaType.OBJECT,
           properties: {
             task_identifier: {
-              type: FunctionDeclarationSchemaType.STRING,
+              type: SchemaType.STRING,
               description: 'Task title or partial match to identify the task',
             },
           },
@@ -91,10 +91,10 @@ const INTENT_TOOLS: Tool[] = [
         name: 'general_chat',
         description: 'General conversation that doesn\'t match other intents. Use this for greetings, questions, or when the user is just chatting.',
         parameters: {
-          type: FunctionDeclarationSchemaType.OBJECT,
+          type: SchemaType.OBJECT,
           properties: {
             response: {
-              type: FunctionDeclarationSchemaType.STRING,
+              type: SchemaType.STRING,
               description: 'A helpful, friendly response to the user',
             },
           },

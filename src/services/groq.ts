@@ -24,7 +24,8 @@ export async function transcribeAudio(audioBuffer: Buffer, filename: string = 'a
       response_format: 'text',
     });
 
-    return transcription.trim();
+    // When response_format is 'text', transcription is a string
+    return (transcription as unknown as string).trim();
   } catch (error) {
     console.error('Error transcribing audio with Groq:', error);
     return null;
@@ -53,9 +54,11 @@ export async function transcribeAudioWithOptions(
       prompt: options?.prompt,
     });
 
+    // When response_format is 'verbose_json', transcription has text and duration
+    const result = transcription as unknown as { text?: string; duration?: number };
     return {
-      text: transcription.text?.trim() || null,
-      duration: transcription.duration,
+      text: result.text?.trim() || null,
+      duration: result.duration,
     };
   } catch (error) {
     console.error('Error transcribing audio with Groq:', error);
