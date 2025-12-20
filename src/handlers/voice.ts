@@ -120,16 +120,28 @@ export async function handleVoiceMessage(msg: TelegramBot.Message): Promise<void
         const userCategories = await getUserCategories(integration.user_id);
 
         // Fetch recent messages for conversation context
+        // Each message row contains both user input AND assistant response
+        // We need to create proper user/assistant pairs for the LLM context
         const recentMessages = await getRecentMessages(integration.user_id, 5);
-        const conversationContext = recentMessages
-          .filter(msg => msg.original_content || msg.ai_response)
-          .map(msg => ({
-            role: msg.direction === 'inbound' ? 'user' as const : 'assistant' as const,
-            content: msg.direction === 'inbound'
-              ? (msg.original_content || msg.transcription || '')
-              : (msg.ai_response || ''),
-          }))
-          .filter(msg => msg.content.length > 0);
+        const conversationContext: Array<{ role: 'user' | 'assistant'; content: string }> = [];
+
+        for (const historyMsg of recentMessages) {
+          // Add user message if present (prefer original_content, fallback to transcription)
+          const userContent = historyMsg.original_content || historyMsg.transcription;
+          if (userContent && userContent.trim().length > 0) {
+            conversationContext.push({
+              role: 'user',
+              content: userContent,
+            });
+          }
+          // Add assistant response if present (creates proper conversation pairs)
+          if (historyMsg.ai_response && historyMsg.ai_response.trim().length > 0) {
+            conversationContext.push({
+              role: 'assistant',
+              content: historyMsg.ai_response,
+            });
+          }
+        }
 
         // Parse intent with AI (using dynamic categories and context)
         const intent = await parseIntent(transcription, userCategories, conversationContext);

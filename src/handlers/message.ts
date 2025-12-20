@@ -99,16 +99,27 @@ export async function handleTextMessage(msg: TelegramBot.Message): Promise<void>
         const userCategories = await getUserCategories(integration.user_id);
 
         // Fetch recent messages for conversation context
+        // Each message row contains both user input AND assistant response
+        // We need to create proper user/assistant pairs for the LLM context
         const recentMessages = await getRecentMessages(integration.user_id, 5);
-        const conversationContext = recentMessages
-          .filter(msg => msg.original_content || msg.ai_response)
-          .map(msg => ({
-            role: msg.direction === 'inbound' ? 'user' as const : 'assistant' as const,
-            content: msg.direction === 'inbound'
-              ? (msg.original_content || '')
-              : (msg.ai_response || ''),
-          }))
-          .filter(msg => msg.content.length > 0);
+        const conversationContext: Array<{ role: 'user' | 'assistant'; content: string }> = [];
+
+        for (const msg of recentMessages) {
+          // Add user message if present
+          if (msg.original_content && msg.original_content.trim().length > 0) {
+            conversationContext.push({
+              role: 'user',
+              content: msg.original_content,
+            });
+          }
+          // Add assistant response if present (creates proper conversation pairs)
+          if (msg.ai_response && msg.ai_response.trim().length > 0) {
+            conversationContext.push({
+              role: 'assistant',
+              content: msg.ai_response,
+            });
+          }
+        }
 
         // Parse intent with AI (using dynamic categories and context)
         const intent = await parseIntent(text, userCategories, conversationContext);
