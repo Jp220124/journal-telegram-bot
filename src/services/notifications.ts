@@ -12,6 +12,8 @@ import {
   calculateJournalStreak,
   getTasksDueToday,
   getWeeklySummaryData,
+  getMoodTrend,
+  getProductivityData,
 } from './supabase.js';
 
 /**
@@ -152,10 +154,21 @@ async function sendDailyBriefings(): Promise<void> {
       // Skip if daily summary is disabled
       if (!integration.daily_summary_enabled) continue;
 
-      const tasks = await getTasksDueToday(integration.user_id);
-      const streak = await calculateJournalStreak(integration.user_id);
+      // Fetch all data in parallel
+      const [tasks, streak, moodTrend, productivity] = await Promise.all([
+        getTasksDueToday(integration.user_id),
+        calculateJournalStreak(integration.user_id),
+        getMoodTrend(integration.user_id, 7),
+        getProductivityData(integration.user_id, 7),
+      ]);
 
-      const message = formatDailyBriefing(tasks.map(t => t.title), streak);
+      const message = formatDailyBriefing(
+        tasks.map(t => t.title),
+        streak,
+        moodTrend.trend,
+        productivity.overdueTasks,
+        productivity.completionRate
+      );
       await sendMessage(integration.platform_chat_id, message);
 
       console.log(`Sent daily briefing to ${integration.platform_chat_id}`);
@@ -200,9 +213,15 @@ async function sendStreakWarnings(): Promise<void> {
 }
 
 /**
- * Format daily briefing message
+ * Format daily briefing message with insights
  */
-function formatDailyBriefing(tasksDueToday: string[], streak: number): string {
+function formatDailyBriefing(
+  tasksDueToday: string[],
+  streak: number,
+  moodTrend: 'improving' | 'declining' | 'stable' | 'insufficient_data',
+  overdueTasks: number,
+  completionRate: number
+): string {
   const date = new Date().toLocaleDateString('en-US', {
     weekday: 'long',
     month: 'short',
@@ -215,6 +234,12 @@ function formatDailyBriefing(tasksDueToday: string[], streak: number): string {
   if (streak > 0) {
     const streakEmoji = streak >= 7 ? '🔥' : '⭐';
     message += `${streakEmoji} *${streak}-day journal streak!*\n\n`;
+  }
+
+  // Smart insight based on data
+  const insight = generateMorningInsight(moodTrend, overdueTasks, completionRate, streak);
+  if (insight) {
+    message += `💡 ${insight}\n\n`;
   }
 
   // Tasks due today
@@ -230,9 +255,62 @@ function formatDailyBriefing(tasksDueToday: string[], streak: number): string {
     message += `✨ *No tasks due today!*\n`;
   }
 
-  message += '\n_Have a productive day!_ 💪';
+  // Overdue warning
+  if (overdueTasks > 0) {
+    message += `\n⚠️ _${overdueTasks} overdue task${overdueTasks !== 1 ? 's' : ''} need attention_`;
+  }
+
+  message += '\n\n_Have a productive day!_ 💪';
 
   return message;
+}
+
+/**
+ * Generate a personalized morning insight
+ */
+function generateMorningInsight(
+  moodTrend: 'improving' | 'declining' | 'stable' | 'insufficient_data',
+  overdueTasks: number,
+  completionRate: number,
+  streak: number
+): string | null {
+  // Priority order for insights (most important first)
+
+  // High priority: Mood declining
+  if (moodTrend === 'declining') {
+    return "Your mood has been declining lately. Remember to take breaks and practice self-care today. 💙";
+  }
+
+  // High priority: Many overdue tasks
+  if (overdueTasks >= 5) {
+    return `You have ${overdueTasks} overdue tasks. Consider reviewing and reprioritizing today. 📋`;
+  }
+
+  // Positive: Great streak
+  if (streak >= 7) {
+    return `Amazing ${streak}-day journaling streak! You're building a great habit. 🌟`;
+  }
+
+  // Positive: Mood improving
+  if (moodTrend === 'improving') {
+    return "Your mood has been improving! Keep doing what's working for you. 🎉";
+  }
+
+  // Productivity feedback
+  if (completionRate >= 80) {
+    return "You've been crushing it with task completion! Keep up the momentum. 🚀";
+  }
+
+  if (completionRate < 40 && completionRate > 0) {
+    return "Try focusing on 2-3 key tasks today. Small wins build momentum! 🎯";
+  }
+
+  // New streak motivation
+  if (streak === 0) {
+    return "Start a new journaling streak today - just a few words count! 📝";
+  }
+
+  return null;
 }
 
 /**

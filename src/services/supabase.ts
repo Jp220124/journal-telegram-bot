@@ -2045,4 +2045,284 @@ export async function getWeeklySummaryData(userId: string): Promise<{
   };
 }
 
+// =====================================================
+// AI Insights Functions (Phase 6)
+// =====================================================
+
+/**
+ * Get mood trend data for the last N days
+ */
+export async function getMoodTrend(userId: string, days: number = 14): Promise<{
+  entries: Array<{ date: string; mood: string | null }>;
+  trend: 'improving' | 'declining' | 'stable' | 'insufficient_data';
+  averageScore: number;
+}> {
+  const startDate = new Date();
+  startDate.setDate(startDate.getDate() - days);
+
+  const { data: entries } = await supabase
+    .from('daily_entries')
+    .select('date, overall_mood')
+    .eq('user_id', userId)
+    .gte('date', startDate.toISOString().split('T')[0])
+    .order('date', { ascending: true });
+
+  const moodScores: Record<string, number> = {
+    great: 5,
+    good: 4,
+    okay: 3,
+    bad: 2,
+    terrible: 1,
+  };
+
+  const moodEntries = (entries || []).map(e => ({
+    date: e.date,
+    mood: e.overall_mood,
+  }));
+
+  // Calculate trend
+  const scoredEntries = moodEntries.filter(e => e.mood && moodScores[e.mood]);
+
+  if (scoredEntries.length < 3) {
+    return {
+      entries: moodEntries,
+      trend: 'insufficient_data',
+      averageScore: 0,
+    };
+  }
+
+  const scores = scoredEntries.map(e => moodScores[e.mood!]);
+  const averageScore = scores.reduce((a, b) => a + b, 0) / scores.length;
+
+  // Compare first half to second half
+  const midpoint = Math.floor(scores.length / 2);
+  const firstHalf = scores.slice(0, midpoint);
+  const secondHalf = scores.slice(midpoint);
+
+  const firstAvg = firstHalf.reduce((a, b) => a + b, 0) / firstHalf.length;
+  const secondAvg = secondHalf.reduce((a, b) => a + b, 0) / secondHalf.length;
+
+  let trend: 'improving' | 'declining' | 'stable';
+  if (secondAvg - firstAvg > 0.3) {
+    trend = 'improving';
+  } else if (firstAvg - secondAvg > 0.3) {
+    trend = 'declining';
+  } else {
+    trend = 'stable';
+  }
+
+  return {
+    entries: moodEntries,
+    trend,
+    averageScore: Math.round(averageScore * 10) / 10,
+  };
+}
+
+/**
+ * Get productivity data for insights
+ */
+export async function getProductivityData(userId: string, days: number = 14): Promise<{
+  totalCreated: number;
+  totalCompleted: number;
+  completionRate: number;
+  averagePerDay: number;
+  mostProductiveCategory: string | null;
+  overdueTasks: number;
+}> {
+  const startDate = new Date();
+  startDate.setDate(startDate.getDate() - days);
+
+  // Get tasks created in period
+  const { data: createdTasks } = await supabase
+    .from('todos')
+    .select('id, category_id, completed, due_date')
+    .eq('user_id', userId)
+    .gte('created_at', startDate.toISOString());
+
+  // Get tasks completed in period
+  const { data: completedTasks } = await supabase
+    .from('todos')
+    .select('id, category_id')
+    .eq('user_id', userId)
+    .eq('completed', true)
+    .gte('updated_at', startDate.toISOString());
+
+  // Get overdue tasks
+  const today = new Date().toISOString().split('T')[0];
+  const { data: overdue } = await supabase
+    .from('todos')
+    .select('id')
+    .eq('user_id', userId)
+    .eq('completed', false)
+    .lt('due_date', today);
+
+  // Get categories for most productive
+  const { data: categories } = await supabase
+    .from('todo_categories')
+    .select('id, name')
+    .eq('user_id', userId);
+
+  const categoryMap = new Map((categories || []).map(c => [c.id, c.name]));
+
+  // Count completions by category
+  const categoryCounts: Record<string, number> = {};
+  for (const task of completedTasks || []) {
+    if (task.category_id) {
+      const name = categoryMap.get(task.category_id) || 'Unknown';
+      categoryCounts[name] = (categoryCounts[name] || 0) + 1;
+    }
+  }
+
+  let mostProductiveCategory: string | null = null;
+  let maxCount = 0;
+  for (const [category, count] of Object.entries(categoryCounts)) {
+    if (count > maxCount) {
+      mostProductiveCategory = category;
+      maxCount = count;
+    }
+  }
+
+  const totalCreated = createdTasks?.length || 0;
+  const totalCompleted = completedTasks?.length || 0;
+
+  return {
+    totalCreated,
+    totalCompleted,
+    completionRate: totalCreated > 0 ? Math.round((totalCompleted / totalCreated) * 100) : 0,
+    averagePerDay: Math.round((totalCompleted / days) * 10) / 10,
+    mostProductiveCategory,
+    overdueTasks: overdue?.length || 0,
+  };
+}
+
+/**
+ * Get recent journal content for AI analysis
+ */
+export async function getRecentJournalContent(userId: string, days: number = 7): Promise<{
+  entries: Array<{
+    date: string;
+    mood: string | null;
+    content: string;
+  }>;
+  totalWords: number;
+}> {
+  const startDate = new Date();
+  startDate.setDate(startDate.getDate() - days);
+
+  const { data: entries } = await supabase
+    .from('daily_entries')
+    .select('date, overall_mood, overall_notes')
+    .eq('user_id', userId)
+    .gte('date', startDate.toISOString().split('T')[0])
+    .not('overall_notes', 'is', null)
+    .order('date', { ascending: false });
+
+  const journalEntries = (entries || []).map(e => ({
+    date: e.date,
+    mood: e.overall_mood,
+    content: e.overall_notes || '',
+  }));
+
+  const totalWords = journalEntries.reduce((sum, e) => {
+    return sum + e.content.split(/\s+/).filter((w: string) => w.length > 0).length;
+  }, 0);
+
+  return {
+    entries: journalEntries,
+    totalWords,
+  };
+}
+
+/**
+ * Get user's journaling patterns
+ */
+export async function getJournalingPatterns(userId: string, days: number = 30): Promise<{
+  totalEntries: number;
+  entriesPerWeek: number;
+  mostActiveDay: string | null;
+  currentStreak: number;
+  longestStreak: number;
+  averageWordsPerEntry: number;
+}> {
+  const startDate = new Date();
+  startDate.setDate(startDate.getDate() - days);
+
+  const { data: entries } = await supabase
+    .from('daily_entries')
+    .select('date, overall_notes')
+    .eq('user_id', userId)
+    .gte('date', startDate.toISOString().split('T')[0])
+    .not('overall_notes', 'is', null)
+    .order('date', { ascending: true });
+
+  if (!entries || entries.length === 0) {
+    return {
+      totalEntries: 0,
+      entriesPerWeek: 0,
+      mostActiveDay: null,
+      currentStreak: 0,
+      longestStreak: 0,
+      averageWordsPerEntry: 0,
+    };
+  }
+
+  // Count entries by day of week
+  const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  const dayCounts: Record<string, number> = {};
+
+  let totalWords = 0;
+
+  for (const entry of entries) {
+    const date = new Date(entry.date + 'T00:00:00');
+    const dayName = dayNames[date.getDay()];
+    dayCounts[dayName] = (dayCounts[dayName] || 0) + 1;
+
+    if (entry.overall_notes) {
+      totalWords += entry.overall_notes.split(/\s+/).filter((w: string) => w.length > 0).length;
+    }
+  }
+
+  let mostActiveDay: string | null = null;
+  let maxDayCount = 0;
+  for (const [day, count] of Object.entries(dayCounts)) {
+    if (count > maxDayCount) {
+      mostActiveDay = day;
+      maxDayCount = count;
+    }
+  }
+
+  // Calculate streaks
+  const currentStreak = await calculateJournalStreak(userId);
+
+  // Calculate longest streak from entries
+  let longestStreak = 0;
+  let tempStreak = 1;
+  const sortedDates = entries.map(e => e.date).sort();
+
+  for (let i = 1; i < sortedDates.length; i++) {
+    const prev = new Date(sortedDates[i - 1] + 'T00:00:00');
+    const curr = new Date(sortedDates[i] + 'T00:00:00');
+    const diffDays = (curr.getTime() - prev.getTime()) / (1000 * 60 * 60 * 24);
+
+    if (diffDays === 1) {
+      tempStreak++;
+    } else {
+      longestStreak = Math.max(longestStreak, tempStreak);
+      tempStreak = 1;
+    }
+  }
+  longestStreak = Math.max(longestStreak, tempStreak);
+
+  const weeks = days / 7;
+
+  return {
+    totalEntries: entries.length,
+    entriesPerWeek: Math.round((entries.length / weeks) * 10) / 10,
+    mostActiveDay,
+    currentStreak,
+    longestStreak,
+    averageWordsPerEntry: Math.round(totalWords / entries.length),
+  };
+}
+
 export { supabase };

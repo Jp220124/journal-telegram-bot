@@ -10,6 +10,9 @@ import {
   verifyTelegramChat,
   saveMessageHistory,
   getUserStatistics,
+  getMoodTrend,
+  getProductivityData,
+  getJournalingPatterns,
   type UserStatistics,
 } from '../services/supabase.js';
 
@@ -129,7 +132,8 @@ export async function handleHelp(msg: TelegramBot.Message): Promise<void> {
       '/today - Show today\'s tasks\n' +
       '/mynotes - Show your notes\n' +
       '/newnote - Create a new note\n' +
-      '/stats - View your statistics\n\n' +
+      '/stats - View your statistics\n' +
+      '/insights - AI-powered insights & patterns\n\n' +
       '*Natural Language:*\n' +
       'Just type naturally! Examples:\n\n' +
       '*Tasks:*\n' +
@@ -339,4 +343,174 @@ function formatStatsMessage(stats: UserStatistics): string {
     `📋 Tasks pending: ${stats.pendingTasks}\n\n` +
     '_Keep up the great work!_ 💪'
   );
+}
+
+/**
+ * Handle /insights command - Show AI-powered insights
+ */
+export async function handleInsights(msg: TelegramBot.Message): Promise<void> {
+  const chatId = msg.chat.id.toString();
+
+  const integration = await findIntegrationByChatId(chatId);
+  if (!integration) {
+    await sendMessage(chatId, 'Please link your account first with /link YOUR_CODE');
+    return;
+  }
+
+  // Gather all insight data in parallel
+  const [moodTrend, productivity, patterns] = await Promise.all([
+    getMoodTrend(integration.user_id, 14),
+    getProductivityData(integration.user_id, 14),
+    getJournalingPatterns(integration.user_id, 30),
+  ]);
+
+  // Format and send insights message
+  const message = formatInsightsMessage(moodTrend, productivity, patterns);
+  await sendMessage(chatId, message);
+}
+
+/**
+ * Format insights into a display message
+ */
+function formatInsightsMessage(
+  moodTrend: {
+    trend: 'improving' | 'declining' | 'stable' | 'insufficient_data';
+    averageScore: number;
+  },
+  productivity: {
+    totalCreated: number;
+    totalCompleted: number;
+    completionRate: number;
+    averagePerDay: number;
+    mostProductiveCategory: string | null;
+    overdueTasks: number;
+  },
+  patterns: {
+    totalEntries: number;
+    entriesPerWeek: number;
+    mostActiveDay: string | null;
+    currentStreak: number;
+    longestStreak: number;
+    averageWordsPerEntry: number;
+  }
+): string {
+  let message = '*🧠 AI Insights*\n\n';
+
+  // Mood Insights
+  message += '*💭 Mood Analysis (14 days)*\n';
+  if (moodTrend.trend === 'insufficient_data') {
+    message += '_Not enough mood data yet. Keep logging your mood!_\n\n';
+  } else {
+    const trendEmoji = {
+      improving: '📈',
+      declining: '📉',
+      stable: '➡️',
+    }[moodTrend.trend];
+
+    const trendText = {
+      improving: 'Your mood has been *improving* lately! Great progress! 🎉',
+      declining: 'Your mood has been *declining*. Consider taking some self-care time. 💙',
+      stable: 'Your mood has been *stable*. Consistency is good! ✨',
+    }[moodTrend.trend];
+
+    const moodLabels = ['', 'terrible', 'bad', 'okay', 'good', 'great'];
+    const avgMoodLabel = moodLabels[Math.round(moodTrend.averageScore)] || 'okay';
+
+    message += `${trendEmoji} ${trendText}\n`;
+    message += `Average mood: *${avgMoodLabel}* (${moodTrend.averageScore}/5)\n\n`;
+  }
+
+  // Productivity Insights
+  message += '*📊 Productivity (14 days)*\n';
+  if (productivity.totalCreated === 0) {
+    message += '_No tasks created in this period._\n\n';
+  } else {
+    // Completion rate feedback
+    let productivityFeedback = '';
+    if (productivity.completionRate >= 80) {
+      productivityFeedback = 'Excellent productivity! 🌟';
+    } else if (productivity.completionRate >= 60) {
+      productivityFeedback = 'Good progress! Keep it up! 💪';
+    } else if (productivity.completionRate >= 40) {
+      productivityFeedback = 'Room for improvement. Try breaking tasks into smaller steps. 📝';
+    } else {
+      productivityFeedback = 'Consider reviewing your task planning. Quality over quantity! 🎯';
+    }
+
+    message += `✅ Completed: ${productivity.totalCompleted}/${productivity.totalCreated} (${productivity.completionRate}%)\n`;
+    message += `📈 Average: ${productivity.averagePerDay} tasks/day\n`;
+
+    if (productivity.mostProductiveCategory) {
+      message += `🏆 Most active category: *${productivity.mostProductiveCategory}*\n`;
+    }
+
+    if (productivity.overdueTasks > 0) {
+      message += `⚠️ Overdue tasks: ${productivity.overdueTasks}\n`;
+    }
+
+    message += `\n_${productivityFeedback}_\n\n`;
+  }
+
+  // Journaling Patterns
+  message += '*📓 Journaling Patterns (30 days)*\n';
+  if (patterns.totalEntries === 0) {
+    message += '_No journal entries in this period. Start journaling today!_\n\n';
+  } else {
+    message += `📝 Total entries: ${patterns.totalEntries}\n`;
+    message += `📅 Entries/week: ${patterns.entriesPerWeek}\n`;
+
+    if (patterns.mostActiveDay) {
+      message += `📆 Most active day: *${patterns.mostActiveDay}*\n`;
+    }
+
+    message += `✍️ Avg words/entry: ${patterns.averageWordsPerEntry}\n`;
+
+    // Streak comparison
+    if (patterns.currentStreak > 0) {
+      const streakEmoji = patterns.currentStreak >= 7 ? '🔥' : '⭐';
+      message += `${streakEmoji} Current streak: *${patterns.currentStreak} days*\n`;
+
+      if (patterns.longestStreak > patterns.currentStreak) {
+        message += `🏆 Longest streak: ${patterns.longestStreak} days\n`;
+      } else if (patterns.currentStreak >= patterns.longestStreak && patterns.currentStreak >= 3) {
+        message += `🎉 *New record streak!*\n`;
+      }
+    }
+
+    message += '\n';
+  }
+
+  // Personalized recommendations
+  message += '*💡 Recommendations*\n';
+  const recommendations: string[] = [];
+
+  if (productivity.overdueTasks > 3) {
+    recommendations.push('Review and prioritize your overdue tasks');
+  }
+
+  if (moodTrend.trend === 'declining') {
+    recommendations.push('Consider adding gratitude entries to your journal');
+  }
+
+  if (patterns.entriesPerWeek < 3) {
+    recommendations.push('Try journaling more regularly - even a few sentences help');
+  }
+
+  if (productivity.completionRate < 50 && productivity.totalCreated > 5) {
+    recommendations.push('Focus on fewer, more achievable tasks each day');
+  }
+
+  if (patterns.currentStreak > 0 && patterns.currentStreak === patterns.longestStreak) {
+    recommendations.push("You're on your best streak! Don't break it!");
+  }
+
+  if (recommendations.length === 0) {
+    recommendations.push("You're doing great! Keep up the excellent habits!");
+  }
+
+  for (const rec of recommendations.slice(0, 3)) {
+    message += `• ${rec}\n`;
+  }
+
+  return message;
 }
