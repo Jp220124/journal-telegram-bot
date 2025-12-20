@@ -55,7 +55,7 @@ function buildIntentTools(userCategories: string[]) {
     type: 'function' as const,
     function: {
       name: 'add_multiple_todos',
-      description: 'Add multiple todos/tasks at once. Use this when the user wants to create MULTIPLE tasks in a single message. Examples: "Add these 4 tasks to JP: Final Lamp, Final Shelf, Final Candle, Final Shoes" or "Add task1, task2, task3 to Work". This is for bulk task creation.',
+      description: 'Add multiple todos/tasks at once. Use this when the user wants to create MULTIPLE tasks in a single message. Examples: "Add these 4 tasks to JP: Final Lamp, Final Shelf, Final Candle, Final Shoes" or "Add task1, task2, task3 to Work by 5pm". This is for bulk task creation.',
       parameters: {
         type: 'object',
         properties: {
@@ -74,7 +74,11 @@ function buildIntentTools(userCategories: string[]) {
           },
           due_date: {
             type: 'string',
-            description: 'Due date for all tasks in YYYY-MM-DD format.',
+            description: 'Due date for all tasks in YYYY-MM-DD format. Parse "today", "tomorrow", etc.',
+          },
+          due_time: {
+            type: 'string',
+            description: 'Due time for all tasks in HH:MM format (24-hour). Parse times like "5pm" to "17:00", "3:30pm" to "15:30", "morning" to "09:00", "afternoon" to "14:00", "evening" to "18:00".',
           },
         },
         required: ['titles'],

@@ -469,6 +469,7 @@ async function executeAddMultipleTodos(
   const result = await addMultipleTodos(userId, titles, {
     priority: (params.priority as 'low' | 'medium' | 'high') || 'medium',
     due_date: params.due_date as string | undefined,
+    due_time: params.due_time as string | undefined,
     category: params.category as string | undefined,
   });
 
@@ -484,6 +485,20 @@ async function executeAddMultipleTodos(
 
   if (params.category) {
     response += `\n📁 Category: ${params.category}`;
+  }
+
+  if (params.due_date || params.due_time) {
+    response += '\n📅 Due:';
+    if (params.due_date) {
+      response += ` ${params.due_date}`;
+    }
+    if (params.due_time) {
+      response += ` at ${params.due_time}`;
+    }
+  }
+
+  if (params.due_date && params.due_time) {
+    response += "\n\n⏰ I'll remind you when they're due!";
   }
 
   if (result.failed.length > 0) {

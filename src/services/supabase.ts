@@ -291,6 +291,8 @@ export async function addMultipleTodos(
     titles,
     category: options?.category,
     categoryId,
+    due_date: options?.due_date,
+    due_time: options?.due_time,
   });
 
   const createdTodos: Todo[] = [];
@@ -322,6 +324,8 @@ export async function addMultipleTodos(
   console.log('[DB Bulk Insert Complete]', {
     created: createdTodos.length,
     failed: failedTitles.length,
+    due_date: options?.due_date,
+    due_time: options?.due_time,
   });
 
   return {
