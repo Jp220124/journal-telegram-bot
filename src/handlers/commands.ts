@@ -1,0 +1,516 @@
+/**
+ * Command handlers for Telegram bot
+ * Handles /start, /help, /link, etc.
+ */
+
+import TelegramBot from 'node-telegram-bot-api';
+import { sendMessage, sendMessageWithKeyboard } from '../services/telegram.js';
+import {
+  findIntegrationByChatId,
+  verifyTelegramChat,
+  saveMessageHistory,
+  getUserStatistics,
+  getMoodTrend,
+  getProductivityData,
+  getJournalingPatterns,
+  type UserStatistics,
+} from '../services/supabase.js';
+
+/**
+ * Handle /start command
+ */
+export async function handleStart(msg: TelegramBot.Message): Promise<void> {
+  const chatId = msg.chat.id.toString();
+  const username = msg.from?.username;
+  const firstName = msg.from?.first_name || 'there';
+
+  // Check if user is already linked
+  const integration = await findIntegrationByChatId(chatId);
+
+  if (integration) {
+    await sendMessage(
+      chatId,
+      `Welcome back, ${firstName}! 👋\n\n` +
+        "I'm your Journal Assistant. Here's what I can do:\n\n" +
+        '📝 *Add Tasks*\n"Add buy groceries tomorrow"\n\n' +
+        '✅ *Complete Tasks*\n"Done with groceries"\n\n' +
+        '📋 *View Tasks*\n"What are my tasks?"\n\n' +
+        '📓 *Journal*\n"Journal: Had a great day today"\n\n' +
+        '📄 *Notes*\n"Create a note about project ideas"\n\n' +
+        'Just send me a message and I\'ll understand!'
+    );
+    return;
+  }
+
+  // New user - prompt to link account
+  await sendMessage(
+    chatId,
+    `Hi ${firstName}! 👋\n\n` +
+      "I'm your Journal & Todo Assistant. I can help you:\n\n" +
+      '• Add tasks via chat or voice\n' +
+      '• Log journal entries\n' +
+      '• Create and manage notes\n' +
+      '• Get reminders when tasks are due\n\n' +
+      '*To get started, link your account:*\n\n' +
+      '1. Open your Daily Journal web app\n' +
+      '2. Go to Settings → Telegram\n' +
+      '3. Get your verification code\n' +
+      '4. Send it here with `/link YOUR_CODE`\n\n' +
+      'Example: `/link 123456`'
+  );
+
+  // Log the interaction
+  await saveMessageHistory(null, null, 'inbound', 'command', '/start');
+}
+
+/**
+ * Handle /link command for account verification
+ */
+export async function handleLink(msg: TelegramBot.Message, code?: string): Promise<void> {
+  const chatId = msg.chat.id.toString();
+  const username = msg.from?.username;
+
+  if (!code || code.length !== 6) {
+    await sendMessage(
+      chatId,
+      '⚠️ Please provide your 6-digit verification code.\n\n' +
+        'Usage: `/link 123456`\n\n' +
+        'Get your code from the Daily Journal web app:\n' +
+        'Settings → Telegram → Generate Code'
+    );
+    return;
+  }
+
+  // Check if already linked
+  const existing = await findIntegrationByChatId(chatId);
+  if (existing) {
+    await sendMessage(chatId, '✅ Your account is already linked!\n\nJust send me a message to get started.');
+    return;
+  }
+
+  // Attempt verification
+  const result = await verifyTelegramChat(code, chatId, username);
+
+  if (result.success) {
+    await sendMessage(
+      chatId,
+      '🎉 *Account linked successfully!*\n\n' +
+        "You're all set! Here's what you can do:\n\n" +
+        '📝 *Add a task:* "Add call mom tomorrow at 5pm"\n' +
+        '📋 *View tasks:* "What are my tasks?"\n' +
+        '✅ *Complete task:* "Done with call mom"\n' +
+        '📓 *Journal:* "Journal: Today was productive"\n' +
+        '🎤 *Voice:* Just send a voice message!\n\n' +
+        "I'll also send you reminders when tasks are due."
+    );
+  } else {
+    await sendMessage(
+      chatId,
+      `❌ ${result.message}\n\n` +
+        'Please check your code and try again.\n' +
+        'Codes expire after 10 minutes.'
+    );
+  }
+
+  await saveMessageHistory(null, result.userId || null, 'inbound', 'command', `/link ${code}`);
+}
+
+/**
+ * Handle /help command
+ */
+export async function handleHelp(msg: TelegramBot.Message): Promise<void> {
+  const chatId = msg.chat.id.toString();
+
+  await sendMessage(
+    chatId,
+    '*📚 Journal Assistant Help*\n\n' +
+      '*Commands:*\n' +
+      '/start - Start the bot\n' +
+      '/help - Show this help\n' +
+      '/link CODE - Link your account\n' +
+      '/tasks - Show your tasks\n' +
+      '/today - Show today\'s tasks\n' +
+      '/mynotes - Show your notes\n' +
+      '/newnote - Create a new note\n' +
+      '/stats - View your statistics\n' +
+      '/insights - AI-powered insights & patterns\n\n' +
+      '*Natural Language:*\n' +
+      'Just type naturally! Examples:\n\n' +
+      '*Tasks:*\n' +
+      '• "Add meeting with John tomorrow 3pm"\n' +
+      '• "Remind me to buy milk"\n' +
+      '• "High priority: finish report"\n' +
+      '• "What do I need to do today?"\n' +
+      '• "Done with the report"\n\n' +
+      '*Notes:*\n' +
+      '• "Create a note about project ideas"\n' +
+      '• "Show my notes"\n' +
+      '• "Read my note about meeting"\n\n' +
+      '*Journal:*\n' +
+      '• "Journal: Felt productive today"\n\n' +
+      '*Voice Messages:*\n' +
+      'Send a voice message and I\'ll transcribe it!\n\n' +
+      '*Notifications:*\n' +
+      "You'll receive reminders before tasks are due.\n" +
+      'Configure in Settings → Telegram'
+  );
+}
+
+/**
+ * Handle /tasks command
+ */
+export async function handleTasks(msg: TelegramBot.Message): Promise<void> {
+  const chatId = msg.chat.id.toString();
+
+  const integration = await findIntegrationByChatId(chatId);
+  if (!integration) {
+    await sendMessage(chatId, 'Please link your account first with /link YOUR_CODE');
+    return;
+  }
+
+  // Import here to avoid circular dependency
+  const { executeQueryTodos } = await import('./message.js');
+  await executeQueryTodos(chatId, integration.user_id, { filter: 'pending' });
+}
+
+/**
+ * Handle /today command
+ */
+export async function handleToday(msg: TelegramBot.Message): Promise<void> {
+  const chatId = msg.chat.id.toString();
+
+  const integration = await findIntegrationByChatId(chatId);
+  if (!integration) {
+    await sendMessage(chatId, 'Please link your account first with /link YOUR_CODE');
+    return;
+  }
+
+  const { executeQueryTodos } = await import('./message.js');
+  await executeQueryTodos(chatId, integration.user_id, { filter: 'today' });
+}
+
+/**
+ * Handle /unlink command
+ */
+export async function handleUnlink(msg: TelegramBot.Message): Promise<void> {
+  const chatId = msg.chat.id.toString();
+
+  await sendMessageWithKeyboard(
+    chatId,
+    '⚠️ Are you sure you want to unlink your account?\n\n' +
+      "You'll stop receiving notifications and won't be able to use the bot until you link again.",
+    [
+      [
+        { text: '✅ Yes, unlink', callback_data: 'confirm_unlink' },
+        { text: '❌ Cancel', callback_data: 'cancel_unlink' },
+      ],
+    ]
+  );
+}
+
+/**
+ * Handle /mynotes command - Show user's notes
+ */
+export async function handleNotes(msg: TelegramBot.Message): Promise<void> {
+  const chatId = msg.chat.id.toString();
+
+  const integration = await findIntegrationByChatId(chatId);
+  if (!integration) {
+    await sendMessage(chatId, 'Please link your account first with /link YOUR_CODE');
+    return;
+  }
+
+  // Import here to avoid circular dependency
+  const { executeQueryNotes } = await import('./message.js');
+  const response = await executeQueryNotes(chatId, integration.user_id, {});
+  await sendMessage(chatId, response);
+}
+
+/**
+ * Handle /newnote command - Start creating a new note
+ */
+export async function handleNewNote(msg: TelegramBot.Message): Promise<void> {
+  const chatId = msg.chat.id.toString();
+
+  const integration = await findIntegrationByChatId(chatId);
+  if (!integration) {
+    await sendMessage(chatId, 'Please link your account first with /link YOUR_CODE');
+    return;
+  }
+
+  // Import here to avoid circular dependency
+  const { setState } = await import('../services/conversationState.js');
+
+  // Set state to awaiting note title
+  setState(chatId, 'AWAITING_NOTE_TITLE', undefined, undefined, {});
+
+  await sendMessage(
+    chatId,
+    '📝 *Create a new note*\n\n' +
+      'What would you like to name this note?\n\n' +
+      '_Send the note title, or /cancel to abort._'
+  );
+}
+
+/**
+ * Handle /stats command - Show user statistics dashboard
+ */
+export async function handleStats(msg: TelegramBot.Message): Promise<void> {
+  const chatId = msg.chat.id.toString();
+
+  const integration = await findIntegrationByChatId(chatId);
+  if (!integration) {
+    await sendMessage(chatId, 'Please link your account first with /link YOUR_CODE');
+    return;
+  }
+
+  // Get user statistics
+  const stats = await getUserStatistics(integration.user_id);
+
+  // Format the statistics message
+  const message = formatStatsMessage(stats);
+
+  await sendMessage(chatId, message);
+}
+
+/**
+ * Format statistics into a nice display message
+ */
+function formatStatsMessage(stats: UserStatistics): string {
+  const moodEmojis: Record<string, string> = {
+    great: '😊',
+    good: '🙂',
+    okay: '😐',
+    bad: '😔',
+    terrible: '😢',
+  };
+
+  // Build mood distribution bar chart
+  const totalMoods = Object.values(stats.moodDistribution).reduce((a, b) => a + b, 0);
+  let moodChart = '';
+  if (totalMoods > 0) {
+    for (const [mood, count] of Object.entries(stats.moodDistribution)) {
+      if (count > 0) {
+        const emoji = moodEmojis[mood] || '';
+        const bars = '█'.repeat(Math.ceil((count / totalMoods) * 10));
+        moodChart += `${emoji} ${mood}: ${bars} (${count})\n`;
+      }
+    }
+  } else {
+    moodChart = '_No mood data yet_\n';
+  }
+
+  // Format streak message with emoji
+  let streakEmoji = '📝';
+  if (stats.journalStreak >= 30) {
+    streakEmoji = '🔥🔥🔥';
+  } else if (stats.journalStreak >= 14) {
+    streakEmoji = '🔥🔥';
+  } else if (stats.journalStreak >= 7) {
+    streakEmoji = '🔥';
+  } else if (stats.journalStreak >= 3) {
+    streakEmoji = '⭐';
+  }
+
+  // Format completion rate with color indicator
+  let rate7Emoji = '🟢';
+  if (stats.completionRate7Days < 50) {
+    rate7Emoji = '🔴';
+  } else if (stats.completionRate7Days < 75) {
+    rate7Emoji = '🟡';
+  }
+
+  let rate30Emoji = '🟢';
+  if (stats.completionRate30Days < 50) {
+    rate30Emoji = '🔴';
+  } else if (stats.completionRate30Days < 75) {
+    rate30Emoji = '🟡';
+  }
+
+  return (
+    '*📊 Your Statistics*\n\n' +
+    '*🔥 Journal Streak*\n' +
+    `${streakEmoji} *${stats.journalStreak}* consecutive day${stats.journalStreak !== 1 ? 's' : ''}\n\n` +
+    '*✅ Task Completion*\n' +
+    `${rate7Emoji} Last 7 days: *${stats.completionRate7Days}%*\n` +
+    `${rate30Emoji} Last 30 days: *${stats.completionRate30Days}%*\n\n` +
+    '*📈 Mood Distribution (30 days)*\n' +
+    moodChart + '\n' +
+    '*📚 Totals*\n' +
+    `📓 Journal entries: ${stats.totalJournalEntries}\n` +
+    `📝 Notes: ${stats.totalNotes}\n` +
+    `✅ Tasks completed: ${stats.completedTasks}\n` +
+    `📋 Tasks pending: ${stats.pendingTasks}\n\n` +
+    '_Keep up the great work!_ 💪'
+  );
+}
+
+/**
+ * Handle /insights command - Show AI-powered insights
+ */
+export async function handleInsights(msg: TelegramBot.Message): Promise<void> {
+  const chatId = msg.chat.id.toString();
+
+  const integration = await findIntegrationByChatId(chatId);
+  if (!integration) {
+    await sendMessage(chatId, 'Please link your account first with /link YOUR_CODE');
+    return;
+  }
+
+  // Gather all insight data in parallel
+  const [moodTrend, productivity, patterns] = await Promise.all([
+    getMoodTrend(integration.user_id, 14),
+    getProductivityData(integration.user_id, 14),
+    getJournalingPatterns(integration.user_id, 30),
+  ]);
+
+  // Format and send insights message
+  const message = formatInsightsMessage(moodTrend, productivity, patterns);
+  await sendMessage(chatId, message);
+}
+
+/**
+ * Format insights into a display message
+ */
+function formatInsightsMessage(
+  moodTrend: {
+    trend: 'improving' | 'declining' | 'stable' | 'insufficient_data';
+    averageScore: number;
+  },
+  productivity: {
+    totalCreated: number;
+    totalCompleted: number;
+    completionRate: number;
+    averagePerDay: number;
+    mostProductiveCategory: string | null;
+    overdueTasks: number;
+  },
+  patterns: {
+    totalEntries: number;
+    entriesPerWeek: number;
+    mostActiveDay: string | null;
+    currentStreak: number;
+    longestStreak: number;
+    averageWordsPerEntry: number;
+  }
+): string {
+  let message = '*🧠 AI Insights*\n\n';
+
+  // Mood Insights
+  message += '*💭 Mood Analysis (14 days)*\n';
+  if (moodTrend.trend === 'insufficient_data') {
+    message += '_Not enough mood data yet. Keep logging your mood!_\n\n';
+  } else {
+    const trendEmoji = {
+      improving: '📈',
+      declining: '📉',
+      stable: '➡️',
+    }[moodTrend.trend];
+
+    const trendText = {
+      improving: 'Your mood has been *improving* lately! Great progress! 🎉',
+      declining: 'Your mood has been *declining*. Consider taking some self-care time. 💙',
+      stable: 'Your mood has been *stable*. Consistency is good! ✨',
+    }[moodTrend.trend];
+
+    const moodLabels = ['', 'terrible', 'bad', 'okay', 'good', 'great'];
+    const avgMoodLabel = moodLabels[Math.round(moodTrend.averageScore)] || 'okay';
+
+    message += `${trendEmoji} ${trendText}\n`;
+    message += `Average mood: *${avgMoodLabel}* (${moodTrend.averageScore}/5)\n\n`;
+  }
+
+  // Productivity Insights
+  message += '*📊 Productivity (14 days)*\n';
+  if (productivity.totalCreated === 0) {
+    message += '_No tasks created in this period._\n\n';
+  } else {
+    // Completion rate feedback
+    let productivityFeedback = '';
+    if (productivity.completionRate >= 80) {
+      productivityFeedback = 'Excellent productivity! 🌟';
+    } else if (productivity.completionRate >= 60) {
+      productivityFeedback = 'Good progress! Keep it up! 💪';
+    } else if (productivity.completionRate >= 40) {
+      productivityFeedback = 'Room for improvement. Try breaking tasks into smaller steps. 📝';
+    } else {
+      productivityFeedback = 'Consider reviewing your task planning. Quality over quantity! 🎯';
+    }
+
+    message += `✅ Completed: ${productivity.totalCompleted}/${productivity.totalCreated} (${productivity.completionRate}%)\n`;
+    message += `📈 Average: ${productivity.averagePerDay} tasks/day\n`;
+
+    if (productivity.mostProductiveCategory) {
+      message += `🏆 Most active category: *${productivity.mostProductiveCategory}*\n`;
+    }
+
+    if (productivity.overdueTasks > 0) {
+      message += `⚠️ Overdue tasks: ${productivity.overdueTasks}\n`;
+    }
+
+    message += `\n_${productivityFeedback}_\n\n`;
+  }
+
+  // Journaling Patterns
+  message += '*📓 Journaling Patterns (30 days)*\n';
+  if (patterns.totalEntries === 0) {
+    message += '_No journal entries in this period. Start journaling today!_\n\n';
+  } else {
+    message += `📝 Total entries: ${patterns.totalEntries}\n`;
+    message += `📅 Entries/week: ${patterns.entriesPerWeek}\n`;
+
+    if (patterns.mostActiveDay) {
+      message += `📆 Most active day: *${patterns.mostActiveDay}*\n`;
+    }
+
+    message += `✍️ Avg words/entry: ${patterns.averageWordsPerEntry}\n`;
+
+    // Streak comparison
+    if (patterns.currentStreak > 0) {
+      const streakEmoji = patterns.currentStreak >= 7 ? '🔥' : '⭐';
+      message += `${streakEmoji} Current streak: *${patterns.currentStreak} days*\n`;
+
+      if (patterns.longestStreak > patterns.currentStreak) {
+        message += `🏆 Longest streak: ${patterns.longestStreak} days\n`;
+      } else if (patterns.currentStreak >= patterns.longestStreak && patterns.currentStreak >= 3) {
+        message += `🎉 *New record streak!*\n`;
+      }
+    }
+
+    message += '\n';
+  }
+
+  // Personalized recommendations
+  message += '*💡 Recommendations*\n';
+  const recommendations: string[] = [];
+
+  if (productivity.overdueTasks > 3) {
+    recommendations.push('Review and prioritize your overdue tasks');
+  }
+
+  if (moodTrend.trend === 'declining') {
+    recommendations.push('Consider adding gratitude entries to your journal');
+  }
+
+  if (patterns.entriesPerWeek < 3) {
+    recommendations.push('Try journaling more regularly - even a few sentences help');
+  }
+
+  if (productivity.completionRate < 50 && productivity.totalCreated > 5) {
+    recommendations.push('Focus on fewer, more achievable tasks each day');
+  }
+
+  if (patterns.currentStreak > 0 && patterns.currentStreak === patterns.longestStreak) {
+    recommendations.push("You're on your best streak! Don't break it!");
+  }
+
+  if (recommendations.length === 0) {
+    recommendations.push("You're doing great! Keep up the excellent habits!");
+  }
+
+  for (const rec of recommendations.slice(0, 3)) {
+    message += `• ${rec}\n`;
+  }
+
+  return message;
+}
