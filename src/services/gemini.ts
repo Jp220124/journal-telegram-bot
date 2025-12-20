@@ -54,6 +54,36 @@ function buildIntentTools(userCategories: string[]) {
   {
     type: 'function' as const,
     function: {
+      name: 'add_multiple_todos',
+      description: 'Add multiple todos/tasks at once. Use this when the user wants to create MULTIPLE tasks in a single message. Examples: "Add these 4 tasks to JP: Final Lamp, Final Shelf, Final Candle, Final Shoes" or "Add task1, task2, task3 to Work". This is for bulk task creation.',
+      parameters: {
+        type: 'object',
+        properties: {
+          titles: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Array of task titles to create. Extract each task name from the user message.',
+          },
+          category: {
+            type: 'string',
+            description: `Task category for ALL tasks. MUST be one of the user's categories: ${categoryList}. Match case-insensitively.`,
+          },
+          priority: {
+            type: 'string',
+            description: 'Priority level for all tasks: low, medium, or high. Default to medium.',
+          },
+          due_date: {
+            type: 'string',
+            description: 'Due date for all tasks in YYYY-MM-DD format.',
+          },
+        },
+        required: ['titles'],
+      },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
       name: 'add_journal',
       description: 'Add a journal entry for the user. Use this when the user wants to write in their journal, log their thoughts, reflect on their day, or record experiences.',
       parameters: {
@@ -188,8 +218,8 @@ function buildIntentTools(userCategories: string[]) {
 }
 
 export interface ParsedIntent {
-  intent: 'add_todo' | 'add_journal' | 'query_todos' | 'mark_complete' | 'add_note' | 'query_notes' | 'read_note' | 'general_chat';
-  parameters: Record<string, string | undefined>;
+  intent: 'add_todo' | 'add_multiple_todos' | 'add_journal' | 'query_todos' | 'mark_complete' | 'add_note' | 'query_notes' | 'read_note' | 'general_chat';
+  parameters: Record<string, string | string[] | undefined>;
   confidence: 'high' | 'medium' | 'low';
   isComplete: boolean; // Whether all required data is present for execution
 }
@@ -466,6 +496,9 @@ Analyze the user's CURRENT message and call the most appropriate function.`;
       let isComplete = true;
       if (functionName === 'add_todo') {
         isComplete = !!args.title && args.title.trim().length > 0;
+      } else if (functionName === 'add_multiple_todos') {
+        // Multiple todos needs at least one title in the array
+        isComplete = Array.isArray(args.titles) && args.titles.length > 0;
       } else if (functionName === 'add_journal') {
         isComplete = !!args.content && args.content.trim().length > 0;
       } else if (functionName === 'mark_complete') {

@@ -268,6 +268,70 @@ export async function addTodo(
 }
 
 /**
+ * Add multiple todos at once (bulk creation)
+ */
+export async function addMultipleTodos(
+  userId: string,
+  titles: string[],
+  options?: {
+    priority?: 'low' | 'medium' | 'high';
+    due_date?: string;
+    due_time?: string;
+    category?: string;
+  }
+): Promise<{ success: boolean; todos: Todo[]; failed: string[] }> {
+  // Look up category_id if category name is provided
+  let categoryId: string | null = null;
+  if (options?.category) {
+    categoryId = await getCategoryIdByName(userId, options.category);
+  }
+
+  console.log('[DB Bulk Insert] Adding multiple todos:', {
+    userId,
+    titles,
+    category: options?.category,
+    categoryId,
+  });
+
+  const createdTodos: Todo[] = [];
+  const failedTitles: string[] = [];
+
+  // Insert each todo
+  for (const title of titles) {
+    const { data, error } = await supabase
+      .from('todos')
+      .insert({
+        user_id: userId,
+        title: title.trim(),
+        priority: options?.priority || 'medium',
+        due_date: options?.due_date || null,
+        due_time: options?.due_time || null,
+        category_id: categoryId,
+      })
+      .select()
+      .single();
+
+    if (error) {
+      console.error('[DB Bulk Insert Error] Failed to add:', title, error);
+      failedTitles.push(title);
+    } else {
+      createdTodos.push(data as Todo);
+    }
+  }
+
+  console.log('[DB Bulk Insert Complete]', {
+    created: createdTodos.length,
+    failed: failedTitles.length,
+  });
+
+  return {
+    success: createdTodos.length > 0,
+    todos: createdTodos,
+    failed: failedTitles,
+  };
+}
+
+/**
  * Mark a todo as complete by searching for title
  */
 export async function markTodoComplete(

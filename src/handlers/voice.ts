@@ -257,19 +257,22 @@ async function handleAwaitingJournalContent(
 async function handleIncompleteIntent(chatId: string, intent: ReturnType<typeof parseIntent> extends Promise<infer T> ? T : never): Promise<string> {
   console.log('[Voice State Handler] Handling incomplete intent:', intent);
 
+  // Cast parameters to string type for convenience
+  const params = intent.parameters as Record<string, string | undefined>;
+
   switch (intent.intent) {
     case 'add_todo':
       // Has category/priority/date but no title
       setState(chatId, 'AWAITING_TODO_TITLE', {
-        category: intent.parameters.category,
-        priority: intent.parameters.priority as 'low' | 'medium' | 'high' | undefined,
-        due_date: intent.parameters.due_date,
-        due_time: intent.parameters.due_time,
+        category: params.category,
+        priority: params.priority as 'low' | 'medium' | 'high' | undefined,
+        due_date: params.due_date,
+        due_time: params.due_time,
       });
 
       let askMessage = '📝 What task would you like to add';
-      if (intent.parameters.category) {
-        askMessage += ` to *${intent.parameters.category}*`;
+      if (params.category) {
+        askMessage += ` to *${params.category}*`;
       }
       askMessage += '?\n\n_Send the task title (text or voice), or /cancel to abort._';
       return askMessage;
@@ -277,12 +280,12 @@ async function handleIncompleteIntent(chatId: string, intent: ReturnType<typeof 
     case 'add_journal':
       // Has mood but no content
       setState(chatId, 'AWAITING_JOURNAL_CONTENT', undefined, {
-        mood: intent.parameters.mood,
+        mood: params.mood,
       });
 
       let journalAsk = '📓 What would you like to write in your journal';
-      if (intent.parameters.mood) {
-        journalAsk += ` (mood: ${intent.parameters.mood})`;
+      if (params.mood) {
+        journalAsk += ` (mood: ${params.mood})`;
       }
       journalAsk += '?\n\n_Send your journal entry (text or voice), or /cancel to abort._';
       return journalAsk;
@@ -292,6 +295,6 @@ async function handleIncompleteIntent(chatId: string, intent: ReturnType<typeof 
       return "❓ Which task would you like to mark as complete?\n\nPlease tell me the task name.";
 
     default:
-      return intent.parameters.response || "I'm not sure how to help with that.";
+      return params.response || "I'm not sure how to help with that.";
   }
 }

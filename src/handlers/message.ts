@@ -10,6 +10,7 @@ import {
   findIntegrationByChatId,
   getUserTodos,
   addTodo,
+  addMultipleTodos,
   markTodoComplete,
   addJournalContent,
   saveMessageHistory,
@@ -305,19 +306,22 @@ async function handleAwaitingNoteContent(
 async function handleIncompleteIntent(chatId: string, intent: ParsedIntent): Promise<string> {
   console.log('[State Handler] Handling incomplete intent:', intent);
 
+  // Cast parameters to string type for convenience
+  const params = intent.parameters as Record<string, string | undefined>;
+
   switch (intent.intent) {
     case 'add_todo':
       // Has category/priority/date but no title
       setState(chatId, 'AWAITING_TODO_TITLE', {
-        category: intent.parameters.category,
-        priority: intent.parameters.priority as 'low' | 'medium' | 'high' | undefined,
-        due_date: intent.parameters.due_date,
-        due_time: intent.parameters.due_time,
+        category: params.category,
+        priority: params.priority as 'low' | 'medium' | 'high' | undefined,
+        due_date: params.due_date,
+        due_time: params.due_time,
       });
 
       let askMessage = '📝 What task would you like to add';
-      if (intent.parameters.category) {
-        askMessage += ` to *${intent.parameters.category}*`;
+      if (params.category) {
+        askMessage += ` to *${params.category}*`;
       }
       askMessage += '?\n\n_Send the task title, or /cancel to abort._';
       return askMessage;
@@ -325,12 +329,12 @@ async function handleIncompleteIntent(chatId: string, intent: ParsedIntent): Pro
     case 'add_journal':
       // Has mood but no content
       setState(chatId, 'AWAITING_JOURNAL_CONTENT', undefined, {
-        mood: intent.parameters.mood,
+        mood: params.mood,
       });
 
       let journalAsk = '📓 What would you like to write in your journal';
-      if (intent.parameters.mood) {
-        journalAsk += ` (mood: ${intent.parameters.mood})`;
+      if (params.mood) {
+        journalAsk += ` (mood: ${params.mood})`;
       }
       journalAsk += '?\n\n_Send your journal entry, or /cancel to abort._';
       return journalAsk;
@@ -342,12 +346,12 @@ async function handleIncompleteIntent(chatId: string, intent: ParsedIntent): Pro
     case 'add_note':
       // Has folder but no title - ask for title first
       setState(chatId, 'AWAITING_NOTE_TITLE', undefined, undefined, {
-        folder_name: intent.parameters.folder,
+        folder_name: params.folder,
       });
 
       let noteAsk = '📝 What would you like to name this note';
-      if (intent.parameters.folder) {
-        noteAsk += ` in *${intent.parameters.folder}*`;
+      if (params.folder) {
+        noteAsk += ` in *${params.folder}*`;
       }
       noteAsk += '?\n\n_Send the note title, or /cancel to abort._';
       return noteAsk;
@@ -357,7 +361,7 @@ async function handleIncompleteIntent(chatId: string, intent: ParsedIntent): Pro
       return "❓ Which note would you like to read?\n\nPlease tell me the note title or use /mynotes to see your notes.";
 
     default:
-      return intent.parameters.response || "I'm not sure how to help with that.";
+      return params.response || "I'm not sure how to help with that.";
   }
 }
 
@@ -365,31 +369,37 @@ async function handleIncompleteIntent(chatId: string, intent: ParsedIntent): Pro
  * Execute parsed intent (when complete)
  */
 export async function executeIntent(chatId: string, userId: string, intent: ParsedIntent): Promise<string> {
+  // Cast parameters to the expected type for most functions
+  const params = intent.parameters as Record<string, string | undefined>;
+
   switch (intent.intent) {
     case 'add_todo':
-      return executeAddTodo(chatId, userId, intent.parameters);
+      return executeAddTodo(chatId, userId, params);
+
+    case 'add_multiple_todos':
+      return executeAddMultipleTodos(chatId, userId, intent.parameters);
 
     case 'query_todos':
-      return executeQueryTodos(chatId, userId, intent.parameters);
+      return executeQueryTodos(chatId, userId, params);
 
     case 'mark_complete':
-      return executeMarkComplete(chatId, userId, intent.parameters);
+      return executeMarkComplete(chatId, userId, params);
 
     case 'add_journal':
-      return executeAddJournal(chatId, userId, intent.parameters);
+      return executeAddJournal(chatId, userId, params);
 
     case 'add_note':
-      return executeAddNote(chatId, userId, intent.parameters);
+      return executeAddNote(chatId, userId, params);
 
     case 'query_notes':
-      return executeQueryNotes(chatId, userId, intent.parameters);
+      return executeQueryNotes(chatId, userId, params);
 
     case 'read_note':
-      return executeReadNote(chatId, userId, intent.parameters);
+      return executeReadNote(chatId, userId, params);
 
     case 'general_chat':
     default:
-      return intent.parameters.response || "I'm not sure how to help with that.";
+      return params.response || "I'm not sure how to help with that.";
   }
 }
 
@@ -437,6 +447,47 @@ async function executeAddTodo(
 
   if (todo.due_date && todo.due_time) {
     response += "\n\n⏰ I'll remind you when it's due!";
+  }
+
+  return response;
+}
+
+/**
+ * Execute add_multiple_todos intent (bulk task creation)
+ */
+async function executeAddMultipleTodos(
+  chatId: string,
+  userId: string,
+  params: Record<string, string | string[] | undefined>
+): Promise<string> {
+  const titles = params.titles;
+
+  if (!titles || !Array.isArray(titles) || titles.length === 0) {
+    return "I couldn't understand what tasks to add. Please try again.";
+  }
+
+  const result = await addMultipleTodos(userId, titles, {
+    priority: (params.priority as 'low' | 'medium' | 'high') || 'medium',
+    due_date: params.due_date as string | undefined,
+    category: params.category as string | undefined,
+  });
+
+  if (!result.success) {
+    return '❌ Failed to add tasks. Please try again.';
+  }
+
+  let response = `✅ Added ${result.todos.length} task${result.todos.length > 1 ? 's' : ''}:\n`;
+
+  for (const todo of result.todos) {
+    response += `• ${todo.title}\n`;
+  }
+
+  if (params.category) {
+    response += `\n📁 Category: ${params.category}`;
+  }
+
+  if (result.failed.length > 0) {
+    response += `\n\n⚠️ Failed to add: ${result.failed.join(', ')}`;
   }
 
   return response;
