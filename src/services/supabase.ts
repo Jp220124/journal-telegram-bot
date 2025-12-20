@@ -1773,4 +1773,276 @@ export async function createTemplateJournalEntry(
   return { success: true, message: 'Template journal entry saved!' };
 }
 
+// =====================================================
+// Calendar & Scheduling Functions (Phase 5)
+// =====================================================
+
+export interface CalendarEvent {
+  type: 'task' | 'journal';
+  date: string;
+  title: string;
+  time?: string;
+  priority?: string;
+  completed?: boolean;
+  mood?: string;
+}
+
+/**
+ * Get tasks and journal entries for a date range (calendar view)
+ */
+export async function getCalendarEvents(
+  userId: string,
+  startDate: string,
+  endDate: string
+): Promise<CalendarEvent[]> {
+  const events: CalendarEvent[] = [];
+
+  // Get tasks in date range
+  const { data: tasks, error: tasksError } = await supabase
+    .from('todos')
+    .select('title, due_date, due_time, priority, completed')
+    .eq('user_id', userId)
+    .gte('due_date', startDate)
+    .lte('due_date', endDate)
+    .order('due_date', { ascending: true })
+    .order('due_time', { ascending: true, nullsFirst: false });
+
+  if (!tasksError && tasks) {
+    for (const task of tasks) {
+      events.push({
+        type: 'task',
+        date: task.due_date,
+        title: task.title,
+        time: task.due_time || undefined,
+        priority: task.priority,
+        completed: task.completed,
+      });
+    }
+  }
+
+  // Get journal entries in date range
+  const { data: journals, error: journalsError } = await supabase
+    .from('daily_entries')
+    .select('date, overall_mood, overall_notes')
+    .eq('user_id', userId)
+    .gte('date', startDate)
+    .lte('date', endDate)
+    .not('overall_notes', 'is', null)
+    .order('date', { ascending: true });
+
+  if (!journalsError && journals) {
+    for (const journal of journals) {
+      events.push({
+        type: 'journal',
+        date: journal.date,
+        title: 'Journal Entry',
+        mood: journal.overall_mood || undefined,
+      });
+    }
+  }
+
+  // Sort by date and time
+  events.sort((a, b) => {
+    if (a.date !== b.date) {
+      return a.date.localeCompare(b.date);
+    }
+    if (a.time && b.time) {
+      return a.time.localeCompare(b.time);
+    }
+    return a.time ? -1 : 1;
+  });
+
+  return events;
+}
+
+/**
+ * Get tasks for today with time slots
+ */
+export async function getTodaySchedule(userId: string): Promise<Todo[]> {
+  const today = new Date().toISOString().split('T')[0];
+
+  const { data, error } = await supabase
+    .from('todos')
+    .select('*')
+    .eq('user_id', userId)
+    .eq('due_date', today)
+    .order('due_time', { ascending: true, nullsFirst: false })
+    .order('priority', { ascending: false });
+
+  if (error) {
+    console.error('Error fetching today schedule:', error);
+    return [];
+  }
+
+  return data as Todo[];
+}
+
+/**
+ * Get tasks for this week
+ */
+export async function getWeekSchedule(userId: string): Promise<Todo[]> {
+  const today = new Date();
+  const startOfWeek = new Date(today);
+  startOfWeek.setDate(today.getDate() - today.getDay()); // Sunday
+  const endOfWeek = new Date(startOfWeek);
+  endOfWeek.setDate(startOfWeek.getDate() + 6); // Saturday
+
+  const startDate = startOfWeek.toISOString().split('T')[0];
+  const endDate = endOfWeek.toISOString().split('T')[0];
+
+  const { data, error } = await supabase
+    .from('todos')
+    .select('*')
+    .eq('user_id', userId)
+    .gte('due_date', startDate)
+    .lte('due_date', endDate)
+    .order('due_date', { ascending: true })
+    .order('due_time', { ascending: true, nullsFirst: false });
+
+  if (error) {
+    console.error('Error fetching week schedule:', error);
+    return [];
+  }
+
+  return data as Todo[];
+}
+
+/**
+ * Get recurring tasks (Daily Recurring category)
+ */
+export async function getRecurringTasks(userId: string): Promise<{ tasks: Todo[]; categoryId: string | null }> {
+  // First find the Daily Recurring category
+  const { data: categories } = await supabase
+    .from('task_categories')
+    .select('id')
+    .eq('user_id', userId)
+    .ilike('name', '%daily%recurring%')
+    .limit(1);
+
+  if (!categories || categories.length === 0) {
+    // Try alternative names
+    const { data: altCategories } = await supabase
+      .from('task_categories')
+      .select('id')
+      .eq('user_id', userId)
+      .or('name.ilike.%recurring%,name.ilike.%daily%')
+      .limit(1);
+
+    if (!altCategories || altCategories.length === 0) {
+      return { tasks: [], categoryId: null };
+    }
+  }
+
+  const categoryId = categories?.[0]?.id;
+
+  if (!categoryId) {
+    return { tasks: [], categoryId: null };
+  }
+
+  // Get tasks in this category
+  const { data: tasks, error } = await supabase
+    .from('todos')
+    .select('*')
+    .eq('user_id', userId)
+    .eq('category_id', categoryId)
+    .order('completed', { ascending: true })
+    .order('title', { ascending: true });
+
+  if (error) {
+    console.error('Error fetching recurring tasks:', error);
+    return { tasks: [], categoryId };
+  }
+
+  return { tasks: tasks as Todo[], categoryId };
+}
+
+/**
+ * Get weekly summary data for notifications
+ */
+export async function getWeeklySummaryData(userId: string): Promise<{
+  tasksCompleted: number;
+  tasksCreated: number;
+  journalEntries: number;
+  notesCreated: number;
+  topMood: string | null;
+  currentStreak: number;
+}> {
+  const today = new Date();
+  const weekAgo = new Date(today);
+  weekAgo.setDate(today.getDate() - 7);
+
+  const startDate = weekAgo.toISOString().split('T')[0];
+  const endDate = today.toISOString().split('T')[0];
+
+  // Get tasks completed this week
+  const { data: completedTasks } = await supabase
+    .from('todos')
+    .select('id, title')
+    .eq('user_id', userId)
+    .eq('completed', true)
+    .gte('updated_at', weekAgo.toISOString());
+
+  // Get tasks created this week
+  const { data: createdTasks } = await supabase
+    .from('todos')
+    .select('id')
+    .eq('user_id', userId)
+    .gte('created_at', weekAgo.toISOString());
+
+  // Get journal entries this week
+  const { data: journals } = await supabase
+    .from('daily_entries')
+    .select('overall_mood')
+    .eq('user_id', userId)
+    .gte('date', startDate)
+    .lte('date', endDate)
+    .not('overall_notes', 'is', null);
+
+  // Get notes created this week
+  const { data: notes } = await supabase
+    .from('notes')
+    .select('id')
+    .eq('user_id', userId)
+    .gte('created_at', weekAgo.toISOString());
+
+  // Calculate mood summary and find top mood
+  const moodCounts: Record<string, number> = {
+    great: 0,
+    good: 0,
+    okay: 0,
+    bad: 0,
+    terrible: 0,
+  };
+
+  if (journals) {
+    for (const journal of journals) {
+      if (journal.overall_mood && moodCounts.hasOwnProperty(journal.overall_mood)) {
+        moodCounts[journal.overall_mood]++;
+      }
+    }
+  }
+
+  // Find the most common mood
+  let topMood: string | null = null;
+  let topMoodCount = 0;
+  for (const [mood, count] of Object.entries(moodCounts)) {
+    if (count > topMoodCount) {
+      topMood = mood;
+      topMoodCount = count;
+    }
+  }
+
+  // Get current streak
+  const currentStreak = await calculateJournalStreak(userId);
+
+  return {
+    tasksCompleted: completedTasks?.length || 0,
+    tasksCreated: createdTasks?.length || 0,
+    journalEntries: journals?.length || 0,
+    notesCreated: notes?.length || 0,
+    topMood,
+    currentStreak,
+  };
+}
+
 export { supabase };

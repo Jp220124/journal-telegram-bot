@@ -351,6 +351,34 @@ function buildIntentTools(userCategories: string[]) {
   {
     type: 'function' as const,
     function: {
+      name: 'query_calendar',
+      description: "Get user's schedule/calendar view. Use this when the user asks about their schedule, what's coming up, what's due, or wants a calendar view of tasks and events.",
+      parameters: {
+        type: 'object',
+        properties: {
+          timeframe: {
+            type: 'string',
+            enum: ['today', 'tomorrow', 'week', 'next_week'],
+            description: 'The timeframe to show: today, tomorrow, this week, or next week. Defaults to today.',
+          },
+        },
+      },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'query_recurring',
+      description: "Get user's recurring/daily tasks. Use this when the user asks about recurring tasks, daily tasks, routine tasks, or habits.",
+      parameters: {
+        type: 'object',
+        properties: {},
+      },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
       name: 'general_chat',
       description: "General conversation that doesn't match other intents. Use this for greetings, questions, or when the user is just chatting.",
       parameters: {
@@ -369,7 +397,7 @@ function buildIntentTools(userCategories: string[]) {
 }
 
 export interface ParsedIntent {
-  intent: 'add_todo' | 'add_multiple_todos' | 'add_journal' | 'query_todos' | 'mark_complete' | 'delete_todo' | 'edit_todo' | 'log_mood' | 'add_note' | 'query_notes' | 'read_note' | 'manage_note' | 'edit_note' | 'query_templates' | 'journal_template' | 'general_chat';
+  intent: 'add_todo' | 'add_multiple_todos' | 'add_journal' | 'query_todos' | 'mark_complete' | 'delete_todo' | 'edit_todo' | 'log_mood' | 'add_note' | 'query_notes' | 'read_note' | 'manage_note' | 'edit_note' | 'query_templates' | 'journal_template' | 'query_calendar' | 'query_recurring' | 'general_chat';
   parameters: Record<string, string | string[] | undefined>;
   confidence: 'high' | 'medium' | 'low';
   isComplete: boolean; // Whether all required data is present for execution

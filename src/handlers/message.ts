@@ -31,7 +31,11 @@ import {
   getUserTemplates,
   getTemplateByName,
   createTemplateJournalEntry,
+  getTodaySchedule,
+  getWeekSchedule,
+  getRecurringTasks,
   type Note,
+  type Todo,
   type JournalTemplate,
   type JournalTemplateWithSections,
 } from '../services/supabase.js';
@@ -452,6 +456,12 @@ export async function executeIntent(chatId: string, userId: string, intent: Pars
 
     case 'journal_template':
       return executeJournalTemplate(chatId, userId, params);
+
+    case 'query_calendar':
+      return executeQueryCalendar(chatId, userId, params);
+
+    case 'query_recurring':
+      return executeQueryRecurring(chatId, userId);
 
     case 'general_chat':
     default:
@@ -1255,6 +1265,157 @@ async function handleAwaitingTemplateSection(
   response += `${nextSection.icon || '📝'} *${nextSection.name}*\n\n`;
 
   response += `_Type your entry, /skip to skip, or /cancel to abort._`;
+
+  return response;
+}
+
+// =====================================================
+// Calendar Execute Functions (Phase 5)
+// =====================================================
+
+/**
+ * Format time for display (HH:MM -> H:MM AM/PM)
+ */
+function formatTime(time: string | null | undefined): string {
+  if (!time) return '';
+  const [hours, minutes] = time.split(':').map(Number);
+  const ampm = hours >= 12 ? 'PM' : 'AM';
+  const displayHours = hours % 12 || 12;
+  return `${displayHours}:${minutes.toString().padStart(2, '0')} ${ampm}`;
+}
+
+/**
+ * Format date for display
+ */
+function formatDate(dateStr: string): string {
+  const date = new Date(dateStr + 'T00:00:00');
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const tomorrow = new Date(today);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+
+  const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+  if (date.getTime() === today.getTime()) {
+    return 'Today';
+  } else if (date.getTime() === tomorrow.getTime()) {
+    return 'Tomorrow';
+  } else {
+    return `${dayNames[date.getDay()]}, ${date.toLocaleDateString()}`;
+  }
+}
+
+/**
+ * Execute query_calendar intent - show schedule
+ */
+async function executeQueryCalendar(
+  chatId: string,
+  userId: string,
+  params: Record<string, string | undefined>
+): Promise<string> {
+  const timeframe = params.timeframe || 'today';
+
+  let tasks: Todo[];
+  let title: string;
+
+  if (timeframe === 'week' || timeframe === 'this week') {
+    tasks = await getWeekSchedule(userId);
+    title = "This Week's Schedule";
+  } else {
+    tasks = await getTodaySchedule(userId);
+    title = "Today's Schedule";
+  }
+
+  if (tasks.length === 0) {
+    if (timeframe === 'week' || timeframe === 'this week') {
+      return "📅 *This Week's Schedule*\n\n" +
+        "No scheduled tasks for this week! 🎉\n\n" +
+        "_Add tasks with due dates to see them here._";
+    }
+    return "📅 *Today's Schedule*\n\n" +
+      "Nothing scheduled for today! 🎉\n\n" +
+      "_Add tasks with due dates to see them here._";
+  }
+
+  // Group tasks by date
+  const tasksByDate = new Map<string, Todo[]>();
+  for (const task of tasks) {
+    const date = task.due_date || 'No date';
+    if (!tasksByDate.has(date)) {
+      tasksByDate.set(date, []);
+    }
+    tasksByDate.get(date)!.push(task);
+  }
+
+  let response = `📅 *${title}*\n\n`;
+
+  for (const [date, dateTasks] of tasksByDate) {
+    response += `*${formatDate(date)}*\n`;
+
+    // Sort by time if available
+    dateTasks.sort((a, b) => {
+      if (!a.due_time && !b.due_time) return 0;
+      if (!a.due_time) return 1;
+      if (!b.due_time) return -1;
+      return a.due_time.localeCompare(b.due_time);
+    });
+
+    for (const task of dateTasks) {
+      const timeStr = task.due_time ? `${formatTime(task.due_time)} ` : '';
+      const priorityEmoji = task.priority === 'high' ? '🔴 ' : task.priority === 'low' ? '🟢 ' : '';
+      const statusEmoji = task.completed ? '✅' : '⬜';
+
+      response += `  ${statusEmoji} ${timeStr}${priorityEmoji}${task.title}\n`;
+    }
+    response += '\n';
+  }
+
+  response += `_${tasks.length} task${tasks.length !== 1 ? 's' : ''} scheduled_`;
+
+  return response;
+}
+
+/**
+ * Execute query_recurring intent - show recurring tasks
+ */
+async function executeQueryRecurring(
+  chatId: string,
+  userId: string
+): Promise<string> {
+  const result = await getRecurringTasks(userId);
+
+  if (result.tasks.length === 0) {
+    return "🔄 *Recurring Tasks*\n\n" +
+      "No recurring tasks found.\n\n" +
+      "_Add tasks to the \"Daily Recurring\" category to see them here._";
+  }
+
+  let response = `🔄 *Daily Recurring Tasks*\n\n`;
+
+  // Separate completed and pending
+  const pending = result.tasks.filter(t => !t.completed);
+  const completed = result.tasks.filter(t => t.completed);
+
+  if (pending.length > 0) {
+    response += `*To Do (${pending.length})*\n`;
+    for (const task of pending) {
+      const timeStr = task.due_time ? ` ⏰ ${formatTime(task.due_time)}` : '';
+      response += `⬜ ${task.title}${timeStr}\n`;
+    }
+    response += '\n';
+  }
+
+  if (completed.length > 0) {
+    response += `*Completed Today (${completed.length})*\n`;
+    for (const task of completed) {
+      response += `✅ ${task.title}\n`;
+    }
+    response += '\n';
+  }
+
+  const completionRate = Math.round((completed.length / result.tasks.length) * 100);
+  response += `\n📊 Progress: ${completed.length}/${result.tasks.length} (${completionRate}%)`;
 
   return response;
 }

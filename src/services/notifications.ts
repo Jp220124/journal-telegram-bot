@@ -11,6 +11,7 @@ import {
   hasJournaledToday,
   calculateJournalStreak,
   getTasksDueToday,
+  getWeeklySummaryData,
 } from './supabase.js';
 
 /**
@@ -105,13 +106,14 @@ export function startNotificationProcessor(intervalMs: number = 60000): NodeJS.T
 }
 
 /**
- * Schedule daily notifications (briefings and streak warnings)
+ * Schedule daily notifications (briefings, streak warnings, and weekly summaries)
  */
 function scheduleDailyNotifications(): void {
   // Check time and run appropriate notifications
   const checkAndSendNotifications = async () => {
     const now = new Date();
     const hour = now.getHours();
+    const dayOfWeek = now.getDay(); // 0 = Sunday
 
     // Morning briefing (8-9 AM)
     if (hour === 8) {
@@ -123,6 +125,12 @@ function scheduleDailyNotifications(): void {
     if (hour === 20) {
       console.log('Checking streak warnings...');
       await sendStreakWarnings();
+    }
+
+    // Sunday weekly summary (7-8 PM)
+    if (dayOfWeek === 0 && hour === 19) {
+      console.log('Sending weekly summaries...');
+      await sendWeeklySummaries();
     }
   };
 
@@ -239,4 +247,92 @@ function formatStreakWarning(streak: number): string {
     `📓 Take a moment to write in your journal today.\n\n` +
     `_Just send me a message starting with "Journal:" to add an entry._`
   );
+}
+
+/**
+ * Send weekly summaries to all users (Sunday evening)
+ */
+async function sendWeeklySummaries(): Promise<void> {
+  const integrations = await getAllVerifiedIntegrations();
+
+  for (const integration of integrations) {
+    try {
+      const summary = await getWeeklySummaryData(integration.user_id);
+      const message = formatWeeklySummary(summary);
+      await sendMessage(integration.platform_chat_id, message);
+
+      console.log(`Sent weekly summary to ${integration.platform_chat_id}`);
+    } catch (error) {
+      console.error(`Error sending weekly summary to ${integration.platform_chat_id}:`, error);
+    }
+
+    // Small delay to avoid rate limiting
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+}
+
+/**
+ * Format weekly summary message
+ */
+function formatWeeklySummary(summary: {
+  tasksCompleted: number;
+  tasksCreated: number;
+  journalEntries: number;
+  notesCreated: number;
+  topMood: string | null;
+  currentStreak: number;
+}): string {
+  let message = `📊 *Weekly Summary*\n\n`;
+  message += `_Here's your week at a glance:_\n\n`;
+
+  // Task stats
+  const completionRate = summary.tasksCreated > 0
+    ? Math.round((summary.tasksCompleted / summary.tasksCreated) * 100)
+    : 0;
+
+  message += `*Tasks*\n`;
+  message += `✅ Completed: ${summary.tasksCompleted}\n`;
+  message += `📝 Created: ${summary.tasksCreated}\n`;
+  if (summary.tasksCreated > 0) {
+    message += `📈 Completion rate: ${completionRate}%\n`;
+  }
+  message += `\n`;
+
+  // Journal stats
+  message += `*Journaling*\n`;
+  message += `📓 Entries: ${summary.journalEntries}\n`;
+  if (summary.currentStreak > 0) {
+    const streakEmoji = summary.currentStreak >= 7 ? '🔥' : '⭐';
+    message += `${streakEmoji} Streak: ${summary.currentStreak} days\n`;
+  }
+  if (summary.topMood) {
+    const moodEmojis: Record<string, string> = {
+      great: '😊',
+      good: '🙂',
+      okay: '😐',
+      bad: '😔',
+      terrible: '😢',
+    };
+    message += `💭 Most common mood: ${moodEmojis[summary.topMood] || ''} ${summary.topMood}\n`;
+  }
+  message += `\n`;
+
+  // Notes stats
+  if (summary.notesCreated > 0) {
+    message += `*Notes*\n`;
+    message += `📝 Created: ${summary.notesCreated}\n\n`;
+  }
+
+  // Motivational footer
+  if (summary.tasksCompleted >= 10) {
+    message += `🌟 _Fantastic productivity this week!_`;
+  } else if (summary.journalEntries >= 5) {
+    message += `📔 _Great journaling consistency!_`;
+  } else if (summary.currentStreak >= 7) {
+    message += `🔥 _Amazing streak! Keep it up!_`;
+  } else {
+    message += `💪 _Keep going strong next week!_`;
+  }
+
+  return message;
 }
