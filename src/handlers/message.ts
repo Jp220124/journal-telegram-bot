@@ -21,6 +21,10 @@ import {
   addNote,
   searchNotes,
   getNoteByTitle,
+  deleteNote,
+  setNoteArchived,
+  setNotePinned,
+  updateNoteContent,
   getUserFolders,
   getUserCategories,
   getRecentMessages,
@@ -419,6 +423,12 @@ export async function executeIntent(chatId: string, userId: string, intent: Pars
 
     case 'read_note':
       return executeReadNote(chatId, userId, params);
+
+    case 'manage_note':
+      return executeManageNote(chatId, userId, params);
+
+    case 'edit_note':
+      return executeEditNote(chatId, userId, params);
 
     case 'general_chat':
     default:
@@ -864,4 +874,97 @@ async function executeReadNote(
   response += ` • Updated: ${updatedDate}`;
 
   return response;
+}
+
+/**
+ * Execute manage_note intent (delete, archive, pin/unpin)
+ */
+async function executeManageNote(
+  chatId: string,
+  userId: string,
+  params: Record<string, string | undefined>
+): Promise<string> {
+  const noteTitle = params.note_title;
+  const action = params.action;
+
+  if (!noteTitle) {
+    return "❓ Which note would you like to manage?\n\nPlease specify the note title.";
+  }
+
+  if (!action) {
+    return "❓ What would you like to do with this note?\n\nYou can: delete, archive, unarchive, pin, or unpin.";
+  }
+
+  switch (action) {
+    case 'delete': {
+      const result = await deleteNote(userId, noteTitle);
+      if (result.success && result.note) {
+        return `🗑️ Deleted: *${result.note.title}*\n\nNote has been removed.`;
+      }
+      return `❌ ${result.message}`;
+    }
+
+    case 'archive': {
+      const result = await setNoteArchived(userId, noteTitle, true);
+      if (result.success && result.note) {
+        return `📦 Archived: *${result.note.title}*\n\nNote moved to archive.`;
+      }
+      return `❌ ${result.message}`;
+    }
+
+    case 'unarchive': {
+      const result = await setNoteArchived(userId, noteTitle, false);
+      if (result.success && result.note) {
+        return `📤 Unarchived: *${result.note.title}*\n\nNote restored from archive.`;
+      }
+      return `❌ ${result.message}`;
+    }
+
+    case 'pin': {
+      const result = await setNotePinned(userId, noteTitle, true);
+      if (result.success && result.note) {
+        return `📌 Pinned: *${result.note.title}*\n\nNote is now pinned to the top.`;
+      }
+      return `❌ ${result.message}`;
+    }
+
+    case 'unpin': {
+      const result = await setNotePinned(userId, noteTitle, false);
+      if (result.success && result.note) {
+        return `📍 Unpinned: *${result.note.title}*\n\nNote is no longer pinned.`;
+      }
+      return `❌ ${result.message}`;
+    }
+
+    default:
+      return `❌ Unknown action: ${action}\n\nValid actions: delete, archive, unarchive, pin, unpin`;
+  }
+}
+
+/**
+ * Execute edit_note intent (append content)
+ */
+async function executeEditNote(
+  chatId: string,
+  userId: string,
+  params: Record<string, string | undefined>
+): Promise<string> {
+  const noteTitle = params.note_title;
+  const contentToAdd = params.content_to_add;
+
+  if (!noteTitle) {
+    return "❓ Which note would you like to edit?\n\nPlease specify the note title.";
+  }
+
+  if (!contentToAdd) {
+    return "❓ What would you like to add to this note?\n\nPlease provide the content to append.";
+  }
+
+  const result = await updateNoteContent(userId, noteTitle, contentToAdd);
+
+  if (result.success && result.note) {
+    return `✏️ Updated: *${result.note.title}*\n\nContent has been added to your note.\n📊 Now ${result.note.word_count} words`;
+  }
+
+  return `❌ ${result.message}`;
 }

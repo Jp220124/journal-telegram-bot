@@ -280,6 +280,49 @@ function buildIntentTools(userCategories: string[]) {
   {
     type: 'function' as const,
     function: {
+      name: 'manage_note',
+      description: 'Manage a note: delete it, archive it, or pin/unpin it. Use this when the user wants to delete a note, archive a note, pin a note, or unpin a note.',
+      parameters: {
+        type: 'object',
+        properties: {
+          note_title: {
+            type: 'string',
+            description: 'The title or partial title of the note to manage.',
+          },
+          action: {
+            type: 'string',
+            enum: ['delete', 'archive', 'unarchive', 'pin', 'unpin'],
+            description: 'The action to perform: delete (remove permanently), archive (move to archive), unarchive (restore from archive), pin (mark as important), unpin (remove pin).',
+          },
+        },
+        required: ['note_title', 'action'],
+      },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'edit_note',
+      description: 'Edit or update an existing note by adding/appending content to it. Use this when the user wants to add more content to a note, update a note, or append text to a note.',
+      parameters: {
+        type: 'object',
+        properties: {
+          note_title: {
+            type: 'string',
+            description: 'The title or partial title of the note to edit.',
+          },
+          content_to_add: {
+            type: 'string',
+            description: 'The new content to add/append to the note.',
+          },
+        },
+        required: ['note_title', 'content_to_add'],
+      },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
       name: 'general_chat',
       description: "General conversation that doesn't match other intents. Use this for greetings, questions, or when the user is just chatting.",
       parameters: {
@@ -298,7 +341,7 @@ function buildIntentTools(userCategories: string[]) {
 }
 
 export interface ParsedIntent {
-  intent: 'add_todo' | 'add_multiple_todos' | 'add_journal' | 'query_todos' | 'mark_complete' | 'delete_todo' | 'edit_todo' | 'log_mood' | 'add_note' | 'query_notes' | 'read_note' | 'general_chat';
+  intent: 'add_todo' | 'add_multiple_todos' | 'add_journal' | 'query_todos' | 'mark_complete' | 'delete_todo' | 'edit_todo' | 'log_mood' | 'add_note' | 'query_notes' | 'read_note' | 'manage_note' | 'edit_note' | 'general_chat';
   parameters: Record<string, string | string[] | undefined>;
   confidence: 'high' | 'medium' | 'low';
   isComplete: boolean; // Whether all required data is present for execution
@@ -596,6 +639,15 @@ Analyze the user's CURRENT message and call the most appropriate function.`;
         isComplete = !!args.title && args.title.trim().length > 0;
       } else if (functionName === 'read_note') {
         isComplete = !!args.note_title && args.note_title.trim().length > 0;
+      } else if (functionName === 'manage_note') {
+        // Need note title and action
+        const validActions = ['delete', 'archive', 'unarchive', 'pin', 'unpin'];
+        isComplete = !!args.note_title && args.note_title.trim().length > 0 &&
+                     !!args.action && validActions.includes(args.action);
+      } else if (functionName === 'edit_note') {
+        // Need note title and content to add
+        isComplete = !!args.note_title && args.note_title.trim().length > 0 &&
+                     !!args.content_to_add && args.content_to_add.trim().length > 0;
       }
       // query_todos and query_notes are always complete (can list without filters)
 

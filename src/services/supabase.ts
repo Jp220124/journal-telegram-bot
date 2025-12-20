@@ -928,6 +928,229 @@ export async function getNoteByTitle(
 }
 
 /**
+ * Delete a note by title
+ */
+export async function deleteNote(
+  userId: string,
+  noteTitle: string
+): Promise<{ success: boolean; note?: Note; message: string }> {
+  // Find note matching the title
+  const { data: notes, error: searchError } = await supabase
+    .from('notes')
+    .select('*')
+    .eq('user_id', userId)
+    .ilike('title', `%${noteTitle}%`)
+    .limit(5);
+
+  if (searchError) {
+    console.error('Error searching notes:', searchError);
+    return { success: false, message: 'Error searching for note' };
+  }
+
+  if (!notes || notes.length === 0) {
+    return { success: false, message: `No note found matching "${noteTitle}"` };
+  }
+
+  if (notes.length > 1) {
+    const titles = notes.map((n) => `- ${n.title}`).join('\n');
+    return {
+      success: false,
+      message: `Multiple notes found. Please be more specific:\n${titles}`,
+    };
+  }
+
+  const noteToDelete = notes[0];
+
+  // Delete the note
+  const { error } = await supabase
+    .from('notes')
+    .delete()
+    .eq('id', noteToDelete.id);
+
+  if (error) {
+    console.error('Error deleting note:', error);
+    return { success: false, message: 'Error deleting note' };
+  }
+
+  return { success: true, note: noteToDelete as Note, message: 'Note deleted!' };
+}
+
+/**
+ * Archive or unarchive a note
+ */
+export async function setNoteArchived(
+  userId: string,
+  noteTitle: string,
+  archived: boolean
+): Promise<{ success: boolean; note?: Note; message: string }> {
+  // Find note matching the title
+  const { data: notes, error: searchError } = await supabase
+    .from('notes')
+    .select('*')
+    .eq('user_id', userId)
+    .eq('is_archived', !archived) // Find notes in opposite state
+    .ilike('title', `%${noteTitle}%`)
+    .limit(5);
+
+  if (searchError) {
+    console.error('Error searching notes:', searchError);
+    return { success: false, message: 'Error searching for note' };
+  }
+
+  if (!notes || notes.length === 0) {
+    const stateWord = archived ? 'active' : 'archived';
+    return { success: false, message: `No ${stateWord} note found matching "${noteTitle}"` };
+  }
+
+  if (notes.length > 1) {
+    const titles = notes.map((n) => `- ${n.title}`).join('\n');
+    return {
+      success: false,
+      message: `Multiple notes found. Please be more specific:\n${titles}`,
+    };
+  }
+
+  const noteToUpdate = notes[0];
+
+  // Update archive status
+  const { data, error } = await supabase
+    .from('notes')
+    .update({ is_archived: archived, updated_at: new Date().toISOString() })
+    .eq('id', noteToUpdate.id)
+    .select()
+    .single();
+
+  if (error) {
+    console.error('Error updating note archive status:', error);
+    return { success: false, message: 'Error updating note' };
+  }
+
+  const action = archived ? 'archived' : 'restored';
+  return { success: true, note: data as Note, message: `Note ${action}!` };
+}
+
+/**
+ * Pin or unpin a note
+ */
+export async function setNotePinned(
+  userId: string,
+  noteTitle: string,
+  pinned: boolean
+): Promise<{ success: boolean; note?: Note; message: string }> {
+  // Find note matching the title (only search non-archived notes)
+  const { data: notes, error: searchError } = await supabase
+    .from('notes')
+    .select('*')
+    .eq('user_id', userId)
+    .eq('is_archived', false)
+    .ilike('title', `%${noteTitle}%`)
+    .limit(5);
+
+  if (searchError) {
+    console.error('Error searching notes:', searchError);
+    return { success: false, message: 'Error searching for note' };
+  }
+
+  if (!notes || notes.length === 0) {
+    return { success: false, message: `No note found matching "${noteTitle}"` };
+  }
+
+  if (notes.length > 1) {
+    const titles = notes.map((n) => `- ${n.title}`).join('\n');
+    return {
+      success: false,
+      message: `Multiple notes found. Please be more specific:\n${titles}`,
+    };
+  }
+
+  const noteToUpdate = notes[0];
+
+  // Check if already in desired state
+  if (noteToUpdate.is_pinned === pinned) {
+    const state = pinned ? 'already pinned' : 'not pinned';
+    return { success: false, message: `Note is ${state}` };
+  }
+
+  // Update pin status
+  const { data, error } = await supabase
+    .from('notes')
+    .update({ is_pinned: pinned, updated_at: new Date().toISOString() })
+    .eq('id', noteToUpdate.id)
+    .select()
+    .single();
+
+  if (error) {
+    console.error('Error updating note pin status:', error);
+    return { success: false, message: 'Error updating note' };
+  }
+
+  const action = pinned ? 'pinned' : 'unpinned';
+  return { success: true, note: data as Note, message: `Note ${action}!` };
+}
+
+/**
+ * Update note content by appending (with title search)
+ */
+export async function updateNoteContent(
+  userId: string,
+  noteTitle: string,
+  contentToAdd: string
+): Promise<{ success: boolean; note?: Note; message: string }> {
+  // Find note matching the title
+  const { data: notes, error: searchError } = await supabase
+    .from('notes')
+    .select('*')
+    .eq('user_id', userId)
+    .eq('is_archived', false)
+    .ilike('title', `%${noteTitle}%`)
+    .limit(5);
+
+  if (searchError) {
+    console.error('Error searching notes:', searchError);
+    return { success: false, message: 'Error searching for note' };
+  }
+
+  if (!notes || notes.length === 0) {
+    return { success: false, message: `No note found matching "${noteTitle}"` };
+  }
+
+  if (notes.length > 1) {
+    const titles = notes.map((n) => `- ${n.title}`).join('\n');
+    return {
+      success: false,
+      message: `Multiple notes found. Please be more specific:\n${titles}`,
+    };
+  }
+
+  const noteToUpdate = notes[0] as Note;
+
+  // Append content
+  const newContent = noteToUpdate.content_text + '\n\n' + contentToAdd;
+  const newTipTapContent = createTipTapContent(newContent);
+  const newWordCount = countWords(newContent);
+
+  // Update the note
+  const { data, error } = await supabase
+    .from('notes')
+    .update({
+      content: newTipTapContent,
+      content_text: newContent,
+      word_count: newWordCount,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', noteToUpdate.id)
+    .select()
+    .single();
+
+  if (error) {
+    console.error('Error updating note content:', error);
+    return { success: false, message: 'Error updating note' };
+  }
+
+  return { success: true, note: data as Note, message: 'Content added to note!' };
+}
+
+/**
  * Create a new note
  */
 export async function addNote(
