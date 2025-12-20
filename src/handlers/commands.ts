@@ -5,7 +5,13 @@
 
 import TelegramBot from 'node-telegram-bot-api';
 import { sendMessage, sendMessageWithKeyboard } from '../services/telegram.js';
-import { findIntegrationByChatId, verifyTelegramChat, saveMessageHistory } from '../services/supabase.js';
+import {
+  findIntegrationByChatId,
+  verifyTelegramChat,
+  saveMessageHistory,
+  getUserStatistics,
+  type UserStatistics,
+} from '../services/supabase.js';
 
 /**
  * Handle /start command
@@ -122,7 +128,8 @@ export async function handleHelp(msg: TelegramBot.Message): Promise<void> {
       '/tasks - Show your tasks\n' +
       '/today - Show today\'s tasks\n' +
       '/mynotes - Show your notes\n' +
-      '/newnote - Create a new note\n\n' +
+      '/newnote - Create a new note\n' +
+      '/stats - View your statistics\n\n' +
       '*Natural Language:*\n' +
       'Just type naturally! Examples:\n\n' +
       '*Tasks:*\n' +
@@ -238,5 +245,98 @@ export async function handleNewNote(msg: TelegramBot.Message): Promise<void> {
     '📝 *Create a new note*\n\n' +
       'What would you like to name this note?\n\n' +
       '_Send the note title, or /cancel to abort._'
+  );
+}
+
+/**
+ * Handle /stats command - Show user statistics dashboard
+ */
+export async function handleStats(msg: TelegramBot.Message): Promise<void> {
+  const chatId = msg.chat.id.toString();
+
+  const integration = await findIntegrationByChatId(chatId);
+  if (!integration) {
+    await sendMessage(chatId, 'Please link your account first with /link YOUR_CODE');
+    return;
+  }
+
+  // Get user statistics
+  const stats = await getUserStatistics(integration.user_id);
+
+  // Format the statistics message
+  const message = formatStatsMessage(stats);
+
+  await sendMessage(chatId, message);
+}
+
+/**
+ * Format statistics into a nice display message
+ */
+function formatStatsMessage(stats: UserStatistics): string {
+  const moodEmojis: Record<string, string> = {
+    great: '😊',
+    good: '🙂',
+    okay: '😐',
+    bad: '😔',
+    terrible: '😢',
+  };
+
+  // Build mood distribution bar chart
+  const totalMoods = Object.values(stats.moodDistribution).reduce((a, b) => a + b, 0);
+  let moodChart = '';
+  if (totalMoods > 0) {
+    for (const [mood, count] of Object.entries(stats.moodDistribution)) {
+      if (count > 0) {
+        const emoji = moodEmojis[mood] || '';
+        const bars = '█'.repeat(Math.ceil((count / totalMoods) * 10));
+        moodChart += `${emoji} ${mood}: ${bars} (${count})\n`;
+      }
+    }
+  } else {
+    moodChart = '_No mood data yet_\n';
+  }
+
+  // Format streak message with emoji
+  let streakEmoji = '📝';
+  if (stats.journalStreak >= 30) {
+    streakEmoji = '🔥🔥🔥';
+  } else if (stats.journalStreak >= 14) {
+    streakEmoji = '🔥🔥';
+  } else if (stats.journalStreak >= 7) {
+    streakEmoji = '🔥';
+  } else if (stats.journalStreak >= 3) {
+    streakEmoji = '⭐';
+  }
+
+  // Format completion rate with color indicator
+  let rate7Emoji = '🟢';
+  if (stats.completionRate7Days < 50) {
+    rate7Emoji = '🔴';
+  } else if (stats.completionRate7Days < 75) {
+    rate7Emoji = '🟡';
+  }
+
+  let rate30Emoji = '🟢';
+  if (stats.completionRate30Days < 50) {
+    rate30Emoji = '🔴';
+  } else if (stats.completionRate30Days < 75) {
+    rate30Emoji = '🟡';
+  }
+
+  return (
+    '*📊 Your Statistics*\n\n' +
+    '*🔥 Journal Streak*\n' +
+    `${streakEmoji} *${stats.journalStreak}* consecutive day${stats.journalStreak !== 1 ? 's' : ''}\n\n` +
+    '*✅ Task Completion*\n' +
+    `${rate7Emoji} Last 7 days: *${stats.completionRate7Days}%*\n` +
+    `${rate30Emoji} Last 30 days: *${stats.completionRate30Days}%*\n\n` +
+    '*📈 Mood Distribution (30 days)*\n' +
+    moodChart + '\n' +
+    '*📚 Totals*\n' +
+    `📓 Journal entries: ${stats.totalJournalEntries}\n` +
+    `📝 Notes: ${stats.totalNotes}\n` +
+    `✅ Tasks completed: ${stats.completedTasks}\n` +
+    `📋 Tasks pending: ${stats.pendingTasks}\n\n` +
+    '_Keep up the great work!_ 💪'
   );
 }

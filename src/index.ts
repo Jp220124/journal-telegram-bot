@@ -23,7 +23,7 @@ import healthRouter from './routes/health.js';
 import webhookRouter from './routes/webhook.js';
 
 // Import handlers
-import { handleStart, handleLink, handleHelp, handleTasks, handleToday, handleUnlink, handleNotes, handleNewNote } from './handlers/commands.js';
+import { handleStart, handleLink, handleHelp, handleTasks, handleToday, handleUnlink, handleNotes, handleNewNote, handleStats } from './handlers/commands.js';
 import { handleTextMessage } from './handlers/message.js';
 import { handleVoiceMessage } from './handlers/voice.js';
 
@@ -50,6 +50,7 @@ bot.onText(/^\/today$/, handleToday);
 bot.onText(/^\/unlink$/, handleUnlink);
 bot.onText(/^\/mynotes$/, handleNotes);
 bot.onText(/^\/newnote$/, handleNewNote);
+bot.onText(/^\/stats$/, handleStats);
 
 // Handle text messages (non-commands)
 bot.on('message', async (msg) => {

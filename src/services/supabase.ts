@@ -1273,4 +1273,268 @@ export async function getUserCategories(userId: string): Promise<string[]> {
   return data.map(cat => cat.name);
 }
 
+// =====================================================
+// Statistics Functions (Phase 3)
+// =====================================================
+
+export interface UserStatistics {
+  journalStreak: number;
+  totalJournalEntries: number;
+  totalNotes: number;
+  totalTasks: number;
+  completedTasks: number;
+  pendingTasks: number;
+  completionRate7Days: number;
+  completionRate30Days: number;
+  moodDistribution: Record<string, number>;
+  lastJournalDate: string | null;
+}
+
+/**
+ * Calculate consecutive days with journal entries (streak)
+ */
+export async function calculateJournalStreak(userId: string): Promise<number> {
+  // Get all journal entries ordered by date descending
+  const { data, error } = await supabase
+    .from('daily_entries')
+    .select('date')
+    .eq('user_id', userId)
+    .not('overall_notes', 'is', null)
+    .order('date', { ascending: false });
+
+  if (error || !data || data.length === 0) {
+    return 0;
+  }
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  // Create a Set of entry dates for O(1) lookup
+  const entryDates = new Set(data.map(e => e.date));
+
+  // Check if there's an entry today or yesterday (to allow for in-progress day)
+  const todayStr = today.toISOString().split('T')[0];
+  const yesterday = new Date(today);
+  yesterday.setDate(yesterday.getDate() - 1);
+  const yesterdayStr = yesterday.toISOString().split('T')[0];
+
+  // Start counting from the most recent day with an entry
+  let startDate: Date;
+  if (entryDates.has(todayStr)) {
+    startDate = today;
+  } else if (entryDates.has(yesterdayStr)) {
+    startDate = yesterday;
+  } else {
+    // No recent entries, streak is 0
+    return 0;
+  }
+
+  // Count consecutive days going backwards
+  let streak = 0;
+  const checkDate = new Date(startDate);
+
+  while (true) {
+    const dateStr = checkDate.toISOString().split('T')[0];
+    if (entryDates.has(dateStr)) {
+      streak++;
+      checkDate.setDate(checkDate.getDate() - 1);
+    } else {
+      break;
+    }
+  }
+
+  return streak;
+}
+
+/**
+ * Get task completion statistics for a given period
+ */
+export async function getTaskCompletionStats(
+  userId: string,
+  days: number
+): Promise<{ completed: number; total: number; rate: number }> {
+  const startDate = new Date();
+  startDate.setDate(startDate.getDate() - days);
+  const startDateStr = startDate.toISOString();
+
+  // Get all tasks created in the period
+  const { data, error } = await supabase
+    .from('todos')
+    .select('id, completed')
+    .eq('user_id', userId)
+    .gte('created_at', startDateStr);
+
+  if (error || !data) {
+    return { completed: 0, total: 0, rate: 0 };
+  }
+
+  const completed = data.filter(t => t.completed).length;
+  const total = data.length;
+  const rate = total > 0 ? Math.round((completed / total) * 100) : 0;
+
+  return { completed, total, rate };
+}
+
+/**
+ * Get mood distribution for a given period
+ */
+export async function getMoodDistribution(
+  userId: string,
+  days: number
+): Promise<Record<string, number>> {
+  const startDate = new Date();
+  startDate.setDate(startDate.getDate() - days);
+  const startDateStr = startDate.toISOString().split('T')[0];
+
+  const { data, error } = await supabase
+    .from('daily_entries')
+    .select('overall_mood')
+    .eq('user_id', userId)
+    .gte('date', startDateStr)
+    .not('overall_mood', 'is', null);
+
+  if (error || !data) {
+    return {};
+  }
+
+  const distribution: Record<string, number> = {
+    great: 0,
+    good: 0,
+    okay: 0,
+    bad: 0,
+    terrible: 0,
+  };
+
+  for (const entry of data) {
+    if (entry.overall_mood && distribution.hasOwnProperty(entry.overall_mood)) {
+      distribution[entry.overall_mood]++;
+    }
+  }
+
+  return distribution;
+}
+
+/**
+ * Get comprehensive user statistics
+ */
+export async function getUserStatistics(userId: string): Promise<UserStatistics> {
+  // Run queries in parallel for efficiency
+  const [
+    streak,
+    stats7Days,
+    stats30Days,
+    moodDist,
+    journalCount,
+    notesCount,
+    tasksData,
+    lastJournal,
+  ] = await Promise.all([
+    calculateJournalStreak(userId),
+    getTaskCompletionStats(userId, 7),
+    getTaskCompletionStats(userId, 30),
+    getMoodDistribution(userId, 30),
+    // Total journal entries
+    supabase
+      .from('daily_entries')
+      .select('id', { count: 'exact', head: true })
+      .eq('user_id', userId)
+      .not('overall_notes', 'is', null),
+    // Total notes
+    supabase
+      .from('notes')
+      .select('id', { count: 'exact', head: true })
+      .eq('user_id', userId)
+      .eq('is_archived', false),
+    // Task counts
+    supabase
+      .from('todos')
+      .select('id, completed')
+      .eq('user_id', userId),
+    // Last journal entry date
+    supabase
+      .from('daily_entries')
+      .select('date')
+      .eq('user_id', userId)
+      .not('overall_notes', 'is', null)
+      .order('date', { ascending: false })
+      .limit(1)
+      .single(),
+  ]);
+
+  const allTasks = tasksData.data || [];
+  const completedTasks = allTasks.filter(t => t.completed).length;
+  const pendingTasks = allTasks.length - completedTasks;
+
+  return {
+    journalStreak: streak,
+    totalJournalEntries: journalCount.count || 0,
+    totalNotes: notesCount.count || 0,
+    totalTasks: allTasks.length,
+    completedTasks,
+    pendingTasks,
+    completionRate7Days: stats7Days.rate,
+    completionRate30Days: stats30Days.rate,
+    moodDistribution: moodDist,
+    lastJournalDate: lastJournal.data?.date || null,
+  };
+}
+
+/**
+ * Check if user has journaled today (for streak warning)
+ */
+export async function hasJournaledToday(userId: string): Promise<boolean> {
+  const today = new Date().toISOString().split('T')[0];
+
+  const { data } = await supabase
+    .from('daily_entries')
+    .select('id')
+    .eq('user_id', userId)
+    .eq('date', today)
+    .not('overall_notes', 'is', null)
+    .single();
+
+  return !!data;
+}
+
+/**
+ * Get tasks due today for daily briefing
+ */
+export async function getTasksDueToday(userId: string): Promise<Todo[]> {
+  const today = new Date().toISOString().split('T')[0];
+
+  const { data, error } = await supabase
+    .from('todos')
+    .select('*')
+    .eq('user_id', userId)
+    .eq('due_date', today)
+    .eq('completed', false)
+    .order('due_time', { ascending: true, nullsFirst: false });
+
+  if (error) {
+    console.error('Error fetching tasks due today:', error);
+    return [];
+  }
+
+  return data as Todo[];
+}
+
+/**
+ * Get all verified integrations for scheduled notifications
+ */
+export async function getAllVerifiedIntegrations(): Promise<UserIntegration[]> {
+  const { data, error } = await supabase
+    .from('user_integrations')
+    .select('*')
+    .eq('platform', 'telegram')
+    .eq('is_verified', true)
+    .eq('notification_enabled', true);
+
+  if (error) {
+    console.error('Error fetching verified integrations:', error);
+    return [];
+  }
+
+  return data as UserIntegration[];
+}
+
 export { supabase };
