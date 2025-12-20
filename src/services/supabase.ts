@@ -770,4 +770,30 @@ export async function appendToNote(noteId: string, additionalContent: string): P
   return data as Note;
 }
 
+/**
+ * Get user's task categories (for dynamic category support)
+ */
+export async function getUserCategories(userId: string): Promise<string[]> {
+  const { data, error } = await supabase
+    .from('task_categories')
+    .select('name')
+    .eq('user_id', userId)
+    .eq('is_active', true)
+    .order('order_index', { ascending: true });
+
+  if (error) {
+    console.error('[Categories] Error fetching user categories:', error);
+    // Fallback to default categories
+    return ['Daily Recurring', 'One-Time Tasks', 'Work', 'Personal'];
+  }
+
+  if (!data || data.length === 0) {
+    // No categories found, return defaults
+    return ['Daily Recurring', 'One-Time Tasks', 'Work', 'Personal'];
+  }
+
+  console.log('[Categories] Fetched user categories:', data.map(c => c.name));
+  return data.map(cat => cat.name);
+}
+
 export { supabase };

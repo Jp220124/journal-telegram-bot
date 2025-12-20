@@ -12,6 +12,8 @@ import {
   saveMessageHistory,
   addTodo,
   addJournalContent,
+  getUserCategories,
+  getRecentMessages,
 } from '../services/supabase.js';
 import { executeIntent, executeQueryTodos } from './message.js';
 import { config } from '../config/env.js';
@@ -114,8 +116,23 @@ export async function handleVoiceMessage(msg: TelegramBot.Message): Promise<void
 
       case 'IDLE':
       default:
-        // Parse intent with AI
-        const intent = await parseIntent(transcription);
+        // Fetch user's custom categories for dynamic category support
+        const userCategories = await getUserCategories(integration.user_id);
+
+        // Fetch recent messages for conversation context
+        const recentMessages = await getRecentMessages(integration.user_id, 5);
+        const conversationContext = recentMessages
+          .filter(msg => msg.original_content || msg.ai_response)
+          .map(msg => ({
+            role: msg.direction === 'inbound' ? 'user' as const : 'assistant' as const,
+            content: msg.direction === 'inbound'
+              ? (msg.original_content || msg.transcription || '')
+              : (msg.ai_response || ''),
+          }))
+          .filter(msg => msg.content.length > 0);
+
+        // Parse intent with AI (using dynamic categories and context)
+        const intent = await parseIntent(transcription, userCategories, conversationContext);
         intentForHistory = intent.intent;
 
         if (intent.isComplete) {

@@ -4,13 +4,20 @@
  */
 
 import { config } from '../config/env.js';
-import { AVAILABLE_CATEGORIES } from '../types/conversation.js';
 
 const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
 const MODEL = 'z-ai/glm-4.5-air:free';
 
-// Intent tool definitions for OpenAI-compatible function calling
-const INTENT_TOOLS = [
+// Default categories (fallback)
+const DEFAULT_CATEGORIES = ['Daily Recurring', 'One-Time Tasks', 'Work', 'Personal'];
+
+/**
+ * Build intent tools with dynamic category list
+ */
+function buildIntentTools(userCategories: string[]) {
+  const categoryList = userCategories.join(', ');
+
+  return [
   {
     type: 'function' as const,
     function: {
@@ -37,7 +44,7 @@ const INTENT_TOOLS = [
           },
           category: {
             type: 'string',
-            description: `Task category. MUST be one of these exact values: ${AVAILABLE_CATEGORIES.join(', ')}. Map user input: "daily recurring/daily/recurring" -> "Daily Recurring", "one-time/once" -> "One-Time Tasks", "work/office/job" -> "Work", "personal/home/life" -> "Personal". If no category mentioned, leave empty.`,
+            description: `Task category. MUST be one of the user's categories: ${categoryList}. Match case-insensitively. Common aliases: "daily/recurring" -> "Daily Recurring", "one-time/once" -> "One-Time Tasks", "office/job" -> "Work", "home/life" -> "Personal". If user mentions a custom category name, use it exactly. If no category mentioned, leave empty.`,
           },
         },
         required: [], // No required fields - allows partial intents
@@ -177,7 +184,8 @@ const INTENT_TOOLS = [
       },
     },
   },
-];
+  ];
+}
 
 export interface ParsedIntent {
   intent: 'add_todo' | 'add_journal' | 'query_todos' | 'mark_complete' | 'add_note' | 'query_notes' | 'read_note' | 'general_chat';
@@ -187,15 +195,22 @@ export interface ParsedIntent {
 }
 
 /**
- * Normalize category input to exact database values
+ * Normalize category input to match user's actual categories
  */
-function normalizeCategory(input: string | undefined): string | undefined {
+function normalizeCategory(input: string | undefined, userCategories: string[]): string | undefined {
   if (!input) return undefined;
 
   const normalized = input.toLowerCase().trim();
 
-  // Map common variations to exact category names
-  const categoryMap: Record<string, string> = {
+  // First check if it matches any user category exactly (case-insensitive)
+  for (const cat of userCategories) {
+    if (cat.toLowerCase() === normalized) {
+      return cat; // Return the exact category name from database
+    }
+  }
+
+  // Map common aliases to standard category names
+  const aliasMap: Record<string, string> = {
     'daily recurring': 'Daily Recurring',
     'daily': 'Daily Recurring',
     'recurring': 'Daily Recurring',
@@ -211,45 +226,50 @@ function normalizeCategory(input: string | undefined): string | undefined {
     'life': 'Personal',
   };
 
-  // Check direct match first
-  if (categoryMap[normalized]) {
-    return categoryMap[normalized];
+  // Check if alias maps to a category that exists in user's list
+  if (aliasMap[normalized]) {
+    const target = aliasMap[normalized];
+    for (const cat of userCategories) {
+      if (cat.toLowerCase() === target.toLowerCase()) {
+        return cat;
+      }
+    }
   }
 
-  // Check if it's already a valid category (case-insensitive)
-  for (const cat of AVAILABLE_CATEGORIES) {
-    if (cat.toLowerCase() === normalized) {
+  // If still no match, try partial matching for custom categories
+  for (const cat of userCategories) {
+    if (cat.toLowerCase().includes(normalized) || normalized.includes(cat.toLowerCase())) {
       return cat;
     }
   }
 
-  return undefined;
+  console.log('[Category Normalize] No match found for:', input, 'in categories:', userCategories);
+  return input; // Return as-is, let the database lookup handle it
 }
 
 /**
  * Extract category from title if AI didn't parse it correctly
  * Handles patterns like "HR App to work" → { cleanTitle: "HR App", category: "Work" }
+ * Also handles custom categories like "Final Lamp to JP" → { cleanTitle: "Final Lamp", category: "JP" }
  */
-function extractCategoryFromTitle(title: string): { cleanTitle: string; category: string | undefined } {
-  // Pattern: matches "to/in/for/under [category]" at the end of the title
-  const categoryPattern = /\s+(?:to|in|for|under)\s+(work|personal|daily(?:\s+recurring)?|one[- ]?time(?:\s+tasks)?)\s*$/i;
+function extractCategoryFromTitle(title: string, userCategories: string[]): { cleanTitle: string; category: string | undefined } {
+  // Build dynamic regex pattern from user categories
+  const categoryNames = userCategories.map(c => c.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
+  const categoryPattern = new RegExp(`\\s+(?:to|in|for|under)\\s+(${categoryNames})\\s*$`, 'i');
 
   const match = title.match(categoryPattern);
 
   if (match) {
-    const categoryText = match[1].toLowerCase();
+    const categoryText = match[1];
     const cleanTitle = title.replace(categoryPattern, '').trim();
 
-    // Map to exact category names
+    // Find the exact category name (case-insensitive match)
     let category: string | undefined;
-    if (categoryText === 'work') {
-      category = 'Work';
-    } else if (categoryText === 'personal') {
-      category = 'Personal';
-    } else if (categoryText.startsWith('daily')) {
-      category = 'Daily Recurring';
-    } else if (categoryText.includes('one') && categoryText.includes('time')) {
-      category = 'One-Time Tasks';
+    for (const cat of userCategories) {
+      if (cat.toLowerCase() === categoryText.toLowerCase()) {
+        category = cat;
+        break;
+      }
     }
 
     console.log('[Category Extraction] Extracted from title:', {
@@ -288,15 +308,15 @@ interface OpenRouterResponse {
  */
 async function callOpenRouter(
   messages: OpenRouterMessage[],
-  useTools: boolean = true
+  tools?: ReturnType<typeof buildIntentTools>
 ): Promise<OpenRouterResponse> {
   const body: Record<string, unknown> = {
     model: MODEL,
     messages,
   };
 
-  if (useTools) {
-    body.tools = INTENT_TOOLS;
+  if (tools) {
+    body.tools = tools;
     body.tool_choice = 'auto';
   }
 
@@ -321,14 +341,21 @@ async function callOpenRouter(
 
 /**
  * Parse user message to determine intent and extract parameters
+ * @param userMessage - The user's message to parse
+ * @param userCategories - The user's custom categories from database
+ * @param context - Previous conversation messages for context
  */
 export async function parseIntent(
   userMessage: string,
+  userCategories: string[] = DEFAULT_CATEGORIES,
   context?: Array<{ role: 'user' | 'assistant'; content: string }>
 ): Promise<ParsedIntent> {
   const today = new Date();
   const todayStr = today.toISOString().split('T')[0];
   const tomorrowStr = new Date(today.getTime() + 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+
+  // Build dynamic category list for the prompt
+  const categoryList = userCategories.join(', ');
 
   const systemPrompt = `You are a helpful assistant for a daily journal and todo app. Your job is to understand what the user wants to do and call the appropriate function.
 
@@ -336,30 +363,28 @@ Current date: ${todayStr}
 Tomorrow: ${tomorrowStr}
 
 CRITICAL: CATEGORY EXTRACTION RULES
-The app has these categories: Daily Recurring, One-Time Tasks, Work, Personal
+This user has these categories: ${categoryList}
 
 When user mentions a category using phrases like "to [category]", "in [category]", "for [category]", "under [category]":
-- "to work" / "in work" / "for work" → category: "Work"
-- "to personal" / "in personal" / "for personal" → category: "Personal"
-- "to daily" / "to daily recurring" → category: "Daily Recurring"
-- "to one-time" / "one time task" → category: "One-Time Tasks"
+- Match the category name case-insensitively
+- Accept ANY category from the user's list above
+- For example: "to JP" → category: "JP", "to Work" → category: "Work"
 
 CRITICAL: PARSING EXAMPLES
 - "Add task to work" → title: (empty), category: "Work"
 - "Add HR App to work" → title: "HR App", category: "Work"
-- "Add task - HR App to work" → title: "HR App", category: "Work"
+- "Add Final Lamp to JP" → title: "Final Lamp", category: "JP"
 - "Add buy groceries to personal" → title: "buy groceries", category: "Personal"
-- "Add task to daily recurring" → title: (empty), category: "Daily Recurring"
-- "Add exercise to daily" → title: "exercise", category: "Daily Recurring"
+- "In category JP add these tasks" → category: "JP"
 
-The phrase "to [category]" at the END of the message indicates the category, NOT part of the title!
-If user says "Add task to work" - the title is EMPTY and category is "Work".
-If user says "Add HR App to work" - the title is "HR App" and category is "Work".
+The phrase "to [category]" or "in [category]" indicates the category, NOT part of the title!
+If user mentions a category name from their list, use it exactly as it appears in their category list.
 
 For add_todo:
 - Extract the task title (what comes between "add" and "to [category]")
-- Extract category from "to [category]" phrase at end
+- Extract category from "to [category]" phrase
 - If only category is mentioned with no specific task, leave title empty
+- Accept any category from the user's list: ${categoryList}
 
 When parsing dates:
 - "today" = ${todayStr}
@@ -382,6 +407,9 @@ For priorities:
 Analyze the user's CURRENT message and call the most appropriate function.`;
 
   try {
+    // Build dynamic tools with user's categories
+    const tools = buildIntentTools(userCategories);
+
     // Build messages array
     const messages: OpenRouterMessage[] = [
       { role: 'system', content: systemPrompt },
@@ -400,7 +428,7 @@ Analyze the user's CURRENT message and call the most appropriate function.`;
     // Add current user message
     messages.push({ role: 'user', content: userMessage });
 
-    const response = await callOpenRouter(messages, true);
+    const response = await callOpenRouter(messages, tools);
     const choice = response.choices[0];
 
     // Check for function call
@@ -415,20 +443,19 @@ Analyze the user's CURRENT message and call the most appropriate function.`;
         args = {};
       }
 
-      // Normalize category if present
+      // Normalize category if present (using user's categories)
       if (args.category) {
-        const normalizedCategory = normalizeCategory(args.category);
+        const normalizedCategory = normalizeCategory(args.category, userCategories);
         if (normalizedCategory) {
           args.category = normalizedCategory;
-        } else {
-          delete args.category; // Remove invalid category
         }
+        // Don't delete - let the database lookup handle unknown categories
       }
 
       // POST-PROCESSING: Extract category from title if AI didn't parse it
-      // This handles cases like "HR App to work" where AI puts everything in title
+      // This handles cases like "HR App to work" or "Final Lamp to JP"
       if (functionName === 'add_todo' && args.title && !args.category) {
-        const extracted = extractCategoryFromTitle(args.title);
+        const extracted = extractCategoryFromTitle(args.title, userCategories);
         if (extracted.category) {
           args.title = extracted.cleanTitle;
           args.category = extracted.category;
@@ -488,7 +515,7 @@ Analyze the user's CURRENT message and call the most appropriate function.`;
 }
 
 /**
- * Generate a conversational response
+ * Generate a conversational response (without function calling)
  */
 export async function generateResponse(prompt: string): Promise<string> {
   try {
@@ -496,7 +523,7 @@ export async function generateResponse(prompt: string): Promise<string> {
       { role: 'user', content: prompt },
     ];
 
-    const response = await callOpenRouter(messages, false);
+    const response = await callOpenRouter(messages); // No tools = no function calling
     return response.choices[0]?.message?.content || "Sorry, I couldn't generate a response right now.";
   } catch (error) {
     console.error('Error generating response:', error);

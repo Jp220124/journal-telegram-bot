@@ -18,6 +18,8 @@ import {
   searchNotes,
   getNoteByTitle,
   getUserFolders,
+  getUserCategories,
+  getRecentMessages,
   type Note,
 } from '../services/supabase.js';
 import {
@@ -25,7 +27,6 @@ import {
   setState,
   resetState,
 } from '../services/conversationState.js';
-import { AVAILABLE_CATEGORIES } from '../types/conversation.js';
 
 /**
  * Handle incoming text message with state machine
@@ -93,8 +94,23 @@ export async function handleTextMessage(msg: TelegramBot.Message): Promise<void>
 
       case 'IDLE':
       default:
-        // Parse intent with AI
-        const intent = await parseIntent(text);
+        // Fetch user's custom categories for dynamic category support
+        const userCategories = await getUserCategories(integration.user_id);
+
+        // Fetch recent messages for conversation context
+        const recentMessages = await getRecentMessages(integration.user_id, 5);
+        const conversationContext = recentMessages
+          .filter(msg => msg.original_content || msg.ai_response)
+          .map(msg => ({
+            role: msg.direction === 'inbound' ? 'user' as const : 'assistant' as const,
+            content: msg.direction === 'inbound'
+              ? (msg.original_content || '')
+              : (msg.ai_response || ''),
+          }))
+          .filter(msg => msg.content.length > 0);
+
+        // Parse intent with AI (using dynamic categories and context)
+        const intent = await parseIntent(text, userCategories, conversationContext);
         intentForHistory = intent.intent;
 
         if (intent.isComplete) {
