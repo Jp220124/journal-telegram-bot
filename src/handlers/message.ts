@@ -12,6 +12,9 @@ import {
   addTodo,
   addMultipleTodos,
   markTodoComplete,
+  deleteTodo,
+  updateTodo,
+  logMood,
   addJournalContent,
   saveMessageHistory,
   getUserNotes,
@@ -396,6 +399,15 @@ export async function executeIntent(chatId: string, userId: string, intent: Pars
     case 'mark_complete':
       return executeMarkComplete(chatId, userId, params);
 
+    case 'delete_todo':
+      return executeDeleteTodo(chatId, userId, params);
+
+    case 'edit_todo':
+      return executeEditTodo(chatId, userId, params);
+
+    case 'log_mood':
+      return executeLogMood(chatId, userId, params);
+
     case 'add_journal':
       return executeAddJournal(chatId, userId, params);
 
@@ -528,8 +540,9 @@ export async function executeQueryTodos(
   params: Record<string, string | undefined>
 ): Promise<string> {
   const filter = (params.filter as 'today' | 'pending' | 'completed' | 'all' | 'high_priority') || 'pending';
+  const category = params.category;
 
-  const todos = await getUserTodos(userId, filter);
+  const todos = await getUserTodos(userId, filter, category);
 
   const filterLabels: Record<string, string> = {
     today: "today's",
@@ -539,9 +552,15 @@ export async function executeQueryTodos(
     high_priority: 'high priority',
   };
 
-  const label = filterLabels[filter] || filter;
+  let label = filterLabels[filter] || filter;
+  if (category) {
+    label = `${label} ${category}`;
+  }
 
   if (todos.length === 0) {
+    if (category) {
+      return `No ${filter} tasks in ${category} category! 🎉`;
+    }
     const emptyMessages: Record<string, string> = {
       today: "No tasks due today! 🎉\n\nEnjoy your free day or add a new task.",
       pending: "You're all caught up! 🎉\n\nNo pending tasks.",
@@ -553,6 +572,101 @@ export async function executeQueryTodos(
   }
 
   return `📋 *Your ${label} tasks:*\n\n${formatTodoList(todos)}\n\n_${todos.length} task${todos.length !== 1 ? 's' : ''} found_`;
+}
+
+/**
+ * Execute delete_todo intent
+ */
+async function executeDeleteTodo(
+  chatId: string,
+  userId: string,
+  params: Record<string, string | undefined>
+): Promise<string> {
+  const taskIdentifier = params.task_identifier;
+  if (!taskIdentifier) {
+    return "I couldn't understand which task to delete. Please specify the task name.";
+  }
+
+  const result = await deleteTodo(userId, taskIdentifier);
+
+  if (result.success && result.todo) {
+    return `🗑️ Deleted: *${result.todo.title}*\n\nTask has been removed from your list.`;
+  }
+
+  return `❌ ${result.message}`;
+}
+
+/**
+ * Execute edit_todo intent
+ */
+async function executeEditTodo(
+  chatId: string,
+  userId: string,
+  params: Record<string, string | undefined>
+): Promise<string> {
+  const taskIdentifier = params.task_identifier;
+  if (!taskIdentifier) {
+    return "I couldn't understand which task to edit. Please specify the task name.";
+  }
+
+  const result = await updateTodo(userId, taskIdentifier, {
+    new_title: params.new_title,
+    new_due_date: params.new_due_date,
+    new_due_time: params.new_due_time,
+    new_priority: params.new_priority as 'low' | 'medium' | 'high' | undefined,
+    new_category: params.new_category,
+  });
+
+  if (result.success && result.todo) {
+    let response = `✏️ Updated: *${result.todo.title}*`;
+
+    // Show what was changed
+    const changes: string[] = [];
+    if (params.new_title) changes.push(`Title: ${params.new_title}`);
+    if (params.new_due_date) changes.push(`Due date: ${params.new_due_date}`);
+    if (params.new_due_time) changes.push(`Due time: ${params.new_due_time}`);
+    if (params.new_priority) changes.push(`Priority: ${params.new_priority}`);
+    if (params.new_category) changes.push(`Category: ${params.new_category}`);
+
+    if (changes.length > 0) {
+      response += `\n\nChanges:\n${changes.map(c => `• ${c}`).join('\n')}`;
+    }
+
+    return response;
+  }
+
+  return `❌ ${result.message}`;
+}
+
+/**
+ * Execute log_mood intent
+ */
+async function executeLogMood(
+  chatId: string,
+  userId: string,
+  params: Record<string, string | undefined>
+): Promise<string> {
+  const mood = params.mood as 'great' | 'good' | 'okay' | 'bad' | 'terrible';
+  if (!mood) {
+    return "I couldn't understand your mood. Please say something like 'feeling great' or 'mood: okay'.";
+  }
+
+  const result = await logMood(userId, mood);
+
+  if (result.success) {
+    const moodEmojis: Record<string, string> = {
+      great: '😊',
+      good: '🙂',
+      okay: '😐',
+      bad: '😔',
+      terrible: '😢',
+    };
+
+    const emoji = moodEmojis[mood] || '';
+    return `${emoji} Mood logged: *${mood}*\n\nYour mood has been recorded for today. Take care of yourself!`;
+  }
+
+  return `❌ ${result.message}`;
 }
 
 /**

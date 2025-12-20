@@ -110,13 +110,17 @@ function buildIntentTools(userCategories: string[]) {
     type: 'function' as const,
     function: {
       name: 'query_todos',
-      description: "Get/list user's todos. Use this when the user wants to see their tasks, check what they need to do, or review their list.",
+      description: "Get/list user's todos. Use this when the user wants to see their tasks, check what they need to do, or review their list. Can filter by status and/or category.",
       parameters: {
         type: 'object',
         properties: {
           filter: {
             type: 'string',
             description: 'Filter for todos: today (due today), pending (not completed), completed, all, or high_priority',
+          },
+          category: {
+            type: 'string',
+            description: `Filter by category. Must be one of: ${categoryList}. Use when user asks for tasks in a specific category like "Show Work tasks" or "Tasks in JP".`,
           },
         },
       },
@@ -136,6 +140,78 @@ function buildIntentTools(userCategories: string[]) {
           },
         },
         required: ['task_identifier'],
+      },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'delete_todo',
+      description: 'Delete/remove a task from the todo list. Use this when the user wants to delete a task, remove it, cancel it, or get rid of it.',
+      parameters: {
+        type: 'object',
+        properties: {
+          task_identifier: {
+            type: 'string',
+            description: 'Task title or partial match to identify the task to delete',
+          },
+        },
+        required: ['task_identifier'],
+      },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'edit_todo',
+      description: 'Edit/update an existing task. Use this when the user wants to change, modify, update, reschedule, or rename a task.',
+      parameters: {
+        type: 'object',
+        properties: {
+          task_identifier: {
+            type: 'string',
+            description: 'Task title or partial match to identify the task to edit',
+          },
+          new_title: {
+            type: 'string',
+            description: 'New title for the task (if user wants to rename it)',
+          },
+          new_due_date: {
+            type: 'string',
+            description: 'New due date in YYYY-MM-DD format. Parse "today", "tomorrow", etc.',
+          },
+          new_due_time: {
+            type: 'string',
+            description: 'New due time in HH:MM format (24-hour). Parse "5pm" to "17:00", etc.',
+          },
+          new_priority: {
+            type: 'string',
+            description: 'New priority level: low, medium, or high',
+          },
+          new_category: {
+            type: 'string',
+            description: `New category. Must be one of: ${categoryList}`,
+          },
+        },
+        required: ['task_identifier'],
+      },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'log_mood',
+      description: 'Log/record mood without writing a full journal entry. Use this when the user just wants to log how they feel, check in with their mood, or record their emotional state without writing journal content.',
+      parameters: {
+        type: 'object',
+        properties: {
+          mood: {
+            type: 'string',
+            enum: ['great', 'good', 'okay', 'bad', 'terrible'],
+            description: "User's mood: great, good, okay, bad, or terrible",
+          },
+        },
+        required: ['mood'],
       },
     },
   },
@@ -222,7 +298,7 @@ function buildIntentTools(userCategories: string[]) {
 }
 
 export interface ParsedIntent {
-  intent: 'add_todo' | 'add_multiple_todos' | 'add_journal' | 'query_todos' | 'mark_complete' | 'add_note' | 'query_notes' | 'read_note' | 'general_chat';
+  intent: 'add_todo' | 'add_multiple_todos' | 'add_journal' | 'query_todos' | 'mark_complete' | 'delete_todo' | 'edit_todo' | 'log_mood' | 'add_note' | 'query_notes' | 'read_note' | 'general_chat';
   parameters: Record<string, string | string[] | undefined>;
   confidence: 'high' | 'medium' | 'low';
   isComplete: boolean; // Whether all required data is present for execution
@@ -507,13 +583,21 @@ Analyze the user's CURRENT message and call the most appropriate function.`;
         isComplete = !!args.content && args.content.trim().length > 0;
       } else if (functionName === 'mark_complete') {
         isComplete = !!args.task_identifier && args.task_identifier.trim().length > 0;
+      } else if (functionName === 'delete_todo') {
+        isComplete = !!args.task_identifier && args.task_identifier.trim().length > 0;
+      } else if (functionName === 'edit_todo') {
+        // Edit needs task identifier AND at least one field to update
+        const hasUpdate = args.new_title || args.new_due_date || args.new_due_time || args.new_priority || args.new_category;
+        isComplete = !!args.task_identifier && args.task_identifier.trim().length > 0 && !!hasUpdate;
+      } else if (functionName === 'log_mood') {
+        isComplete = !!args.mood && ['great', 'good', 'okay', 'bad', 'terrible'].includes(args.mood);
       } else if (functionName === 'add_note') {
         // A note needs at least a title to be complete
         isComplete = !!args.title && args.title.trim().length > 0;
       } else if (functionName === 'read_note') {
         isComplete = !!args.note_title && args.note_title.trim().length > 0;
       }
-      // query_notes is always complete (can list recent notes without search)
+      // query_todos and query_notes are always complete (can list without filters)
 
       // Debug logging to track AI extraction
       console.log('[AI Intent Debug]', {

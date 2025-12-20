@@ -148,7 +148,8 @@ export async function verifyTelegramChat(
  */
 export async function getUserTodos(
   userId: string,
-  filter: 'today' | 'pending' | 'completed' | 'all' | 'high_priority' = 'pending'
+  filter: 'today' | 'pending' | 'completed' | 'all' | 'high_priority' = 'pending',
+  category?: string
 ): Promise<Todo[]> {
   let query = supabase
     .from('todos')
@@ -172,6 +173,14 @@ export async function getUserTodos(
       query = query.eq('priority', 'high').eq('completed', false);
       break;
     // 'all' - no additional filters
+  }
+
+  // Filter by category if provided
+  if (category) {
+    const categoryId = await getCategoryIdByName(userId, category);
+    if (categoryId) {
+      query = query.eq('category_id', categoryId);
+    }
   }
 
   const { data, error } = await query.limit(20);
@@ -382,6 +391,183 @@ export async function markTodoComplete(
   }
 
   return { success: true, todo: data as Todo, message: 'Task completed!' };
+}
+
+/**
+ * Delete a todo by identifier (soft match)
+ */
+export async function deleteTodo(
+  userId: string,
+  taskIdentifier: string
+): Promise<{ success: boolean; todo?: Todo; message: string }> {
+  // Find todos matching the identifier (case-insensitive partial match)
+  const { data: todos, error: searchError } = await supabase
+    .from('todos')
+    .select('*')
+    .eq('user_id', userId)
+    .ilike('title', `%${taskIdentifier}%`)
+    .limit(5);
+
+  if (searchError) {
+    console.error('Error searching todos:', searchError);
+    return { success: false, message: 'Error searching for task' };
+  }
+
+  if (!todos || todos.length === 0) {
+    return { success: false, message: `No task found matching "${taskIdentifier}"` };
+  }
+
+  if (todos.length > 1) {
+    const titles = todos.map((t) => `- ${t.title}`).join('\n');
+    return {
+      success: false,
+      message: `Multiple tasks found. Please be more specific:\n${titles}`,
+    };
+  }
+
+  const todoToDelete = todos[0];
+
+  // Delete the task
+  const { error } = await supabase
+    .from('todos')
+    .delete()
+    .eq('id', todoToDelete.id);
+
+  if (error) {
+    console.error('Error deleting todo:', error);
+    return { success: false, message: 'Error deleting task' };
+  }
+
+  return { success: true, todo: todoToDelete as Todo, message: 'Task deleted!' };
+}
+
+/**
+ * Update a todo by identifier
+ */
+export async function updateTodo(
+  userId: string,
+  taskIdentifier: string,
+  updates: {
+    new_title?: string;
+    new_due_date?: string;
+    new_due_time?: string;
+    new_priority?: 'low' | 'medium' | 'high';
+    new_category?: string;
+  }
+): Promise<{ success: boolean; todo?: Todo; message: string }> {
+  // Find todos matching the identifier (case-insensitive partial match)
+  const { data: todos, error: searchError } = await supabase
+    .from('todos')
+    .select('*')
+    .eq('user_id', userId)
+    .ilike('title', `%${taskIdentifier}%`)
+    .limit(5);
+
+  if (searchError) {
+    console.error('Error searching todos:', searchError);
+    return { success: false, message: 'Error searching for task' };
+  }
+
+  if (!todos || todos.length === 0) {
+    return { success: false, message: `No task found matching "${taskIdentifier}"` };
+  }
+
+  if (todos.length > 1) {
+    const titles = todos.map((t) => `- ${t.title}`).join('\n');
+    return {
+      success: false,
+      message: `Multiple tasks found. Please be more specific:\n${titles}`,
+    };
+  }
+
+  const todoToUpdate = todos[0];
+
+  // Build update object
+  const updateData: Record<string, unknown> = {
+    updated_at: new Date().toISOString(),
+  };
+
+  if (updates.new_title) {
+    updateData.title = updates.new_title;
+  }
+  if (updates.new_due_date) {
+    updateData.due_date = updates.new_due_date;
+  }
+  if (updates.new_due_time) {
+    updateData.due_time = updates.new_due_time;
+  }
+  if (updates.new_priority) {
+    updateData.priority = updates.new_priority;
+  }
+  if (updates.new_category) {
+    const categoryId = await getCategoryIdByName(userId, updates.new_category);
+    if (categoryId) {
+      updateData.category_id = categoryId;
+    }
+  }
+
+  // Update the task
+  const { data, error } = await supabase
+    .from('todos')
+    .update(updateData)
+    .eq('id', todoToUpdate.id)
+    .select()
+    .single();
+
+  if (error) {
+    console.error('Error updating todo:', error);
+    return { success: false, message: 'Error updating task' };
+  }
+
+  return { success: true, todo: data as Todo, message: 'Task updated!' };
+}
+
+/**
+ * Log mood without journal content (quick mood check-in)
+ */
+export async function logMood(
+  userId: string,
+  mood: 'great' | 'good' | 'okay' | 'bad' | 'terrible'
+): Promise<{ success: boolean; message: string }> {
+  const today = new Date().toISOString().split('T')[0];
+
+  // Check if entry exists for today
+  const { data: existing } = await supabase
+    .from('daily_entries')
+    .select('id')
+    .eq('user_id', userId)
+    .eq('date', today)
+    .single();
+
+  if (existing) {
+    // Update existing entry's mood
+    const { error } = await supabase
+      .from('daily_entries')
+      .update({ overall_mood: mood, updated_at: new Date().toISOString() })
+      .eq('id', existing.id);
+
+    if (error) {
+      console.error('Error updating mood:', error);
+      return { success: false, message: 'Error saving mood' };
+    }
+  } else {
+    // Create new entry with just mood
+    const { error } = await supabase
+      .from('daily_entries')
+      .insert({
+        user_id: userId,
+        date: today,
+        overall_mood: mood,
+        overall_notes: '',
+      });
+
+    if (error) {
+      console.error('Error creating mood entry:', error);
+      return { success: false, message: 'Error saving mood' };
+    }
+  }
+
+  return { success: true, message: 'Mood logged!' };
 }
 
 /**
