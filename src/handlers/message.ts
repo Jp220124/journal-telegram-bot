@@ -28,7 +28,12 @@ import {
   getUserFolders,
   getUserCategories,
   getRecentMessages,
+  getUserTemplates,
+  getTemplateByName,
+  createTemplateJournalEntry,
   type Note,
+  type JournalTemplate,
+  type JournalTemplateWithSections,
 } from '../services/supabase.js';
 import {
   getState,
@@ -98,6 +103,18 @@ export async function handleTextMessage(msg: TelegramBot.Message): Promise<void>
         // User's message IS the note content - create the note
         response = await handleAwaitingNoteContent(chatId, integration.user_id, text, conversationState.pendingNote);
         intentForHistory = 'add_note';
+        break;
+
+      case 'AWAITING_TEMPLATE_SELECTION':
+        // User is selecting a template by number or name
+        response = await handleAwaitingTemplateSelection(chatId, integration.user_id, text);
+        intentForHistory = 'journal_template';
+        break;
+
+      case 'AWAITING_TEMPLATE_SECTION':
+        // User is providing content for a template section
+        response = await handleAwaitingTemplateSection(chatId, integration.user_id, text, conversationState.pendingTemplate);
+        intentForHistory = 'journal_template';
         break;
 
       case 'IDLE':
@@ -429,6 +446,12 @@ export async function executeIntent(chatId: string, userId: string, intent: Pars
 
     case 'edit_note':
       return executeEditNote(chatId, userId, params);
+
+    case 'query_templates':
+      return executeQueryTemplates(chatId, userId);
+
+    case 'journal_template':
+      return executeJournalTemplate(chatId, userId, params);
 
     case 'general_chat':
     default:
@@ -967,4 +990,271 @@ async function executeEditNote(
   }
 
   return `❌ ${result.message}`;
+}
+
+// =====================================================
+// Template Execute Functions (Phase 4)
+// =====================================================
+
+/**
+ * Execute query_templates intent - list user's templates
+ */
+async function executeQueryTemplates(
+  chatId: string,
+  userId: string
+): Promise<string> {
+  const templates = await getUserTemplates(userId);
+
+  if (!templates || templates.length === 0) {
+    return (
+      "📓 You don't have any journal templates yet.\n\n" +
+      "Create templates in the Daily Journal web app to use them here!"
+    );
+  }
+
+  let response = `📓 *Your Journal Templates*\n\n`;
+
+  templates.forEach((template, index) => {
+    const defaultBadge = template.is_default ? ' ⭐' : '';
+    const description = template.description ? `\n   _${template.description}_` : '';
+    response += `${index + 1}. *${template.name}*${defaultBadge}${description}\n\n`;
+  });
+
+  response += `\n_Say "Journal with [template name]" to start journaling!_`;
+
+  return response;
+}
+
+/**
+ * Execute journal_template intent - start journaling with a template
+ */
+async function executeJournalTemplate(
+  chatId: string,
+  userId: string,
+  params: Record<string, string | undefined>
+): Promise<string> {
+  const templateName = params.template_name;
+
+  if (!templateName) {
+    // No template specified - show list and ask for selection
+    const templates = await getUserTemplates(userId);
+
+    if (!templates || templates.length === 0) {
+      return (
+        "📓 You don't have any journal templates yet.\n\n" +
+        "Create templates in the Daily Journal web app to use them here!"
+      );
+    }
+
+    let response = `📓 *Select a Template*\n\n`;
+
+    templates.forEach((template, index) => {
+      const defaultBadge = template.is_default ? ' ⭐' : '';
+      response += `${index + 1}. *${template.name}*${defaultBadge}\n`;
+    });
+
+    response += `\n_Reply with the template number or name._`;
+
+    // Set state to awaiting template selection
+    setState(chatId, 'AWAITING_TEMPLATE_SELECTION', undefined, undefined, undefined, {});
+
+    return response;
+  }
+
+  // Try to find the template
+  const result = await getTemplateByName(userId, templateName);
+
+  if (!result.success) {
+    if (result.templates && result.templates.length > 1) {
+      // Multiple templates matched
+      let response = `📓 *Multiple templates found:*\n\n`;
+      result.templates.forEach((template, index) => {
+        response += `${index + 1}. *${template.name}*\n`;
+      });
+      response += `\n_Please be more specific or reply with a number._`;
+
+      setState(chatId, 'AWAITING_TEMPLATE_SELECTION', undefined, undefined, undefined, {});
+      return response;
+    }
+    return `❌ ${result.message}`;
+  }
+
+  // Template found - start the journaling flow
+  return startTemplateJournaling(chatId, result.template!);
+}
+
+/**
+ * Start the template journaling flow
+ */
+function startTemplateJournaling(
+  chatId: string,
+  template: JournalTemplateWithSections
+): string {
+  const sections = template.journal_template_sections;
+
+  if (!sections || sections.length === 0) {
+    return `❌ Template "${template.name}" has no sections. Please add sections in the web app.`;
+  }
+
+  const firstSection = sections[0];
+
+  // Set state to collect section content
+  setState(chatId, 'AWAITING_TEMPLATE_SECTION', undefined, undefined, undefined, {
+    template_id: template.id,
+    template_name: template.name,
+    sections: sections.map(s => ({
+      id: s.id,
+      name: s.name,
+      icon: s.icon,
+      color: s.color,
+      order_index: s.order_index,
+    })),
+    current_section_index: 0,
+    collected_sections: {},
+    date: new Date().toISOString().split('T')[0],
+  });
+
+  let response = `📓 *Journaling with: ${template.name}*\n\n`;
+  response += `Section 1/${sections.length}\n`;
+  response += `${firstSection.icon || '📝'} *${firstSection.name}*\n\n`;
+
+  if (firstSection.description) {
+    response += `_${firstSection.description}_\n\n`;
+  }
+
+  response += `_Type your entry for this section, or /skip to skip, or /cancel to abort._`;
+
+  return response;
+}
+
+/**
+ * Handle template selection state
+ */
+async function handleAwaitingTemplateSelection(
+  chatId: string,
+  userId: string,
+  text: string
+): Promise<string> {
+  const templates = await getUserTemplates(userId);
+
+  if (!templates || templates.length === 0) {
+    resetState(chatId);
+    return "❌ No templates found. Please create templates in the web app first.";
+  }
+
+  // Check if input is a number
+  const num = parseInt(text, 10);
+  let selectedTemplate: JournalTemplateWithSections | null = null;
+
+  if (!isNaN(num) && num >= 1 && num <= templates.length) {
+    // User selected by number
+    const template = templates[num - 1];
+    const result = await getTemplateByName(userId, template.name);
+    if (result.success && result.template) {
+      selectedTemplate = result.template;
+    }
+  } else {
+    // User selected by name
+    const result = await getTemplateByName(userId, text);
+    if (result.success && result.template) {
+      selectedTemplate = result.template;
+    } else if (result.templates && result.templates.length > 1) {
+      // Multiple matches
+      let response = `📓 *Multiple templates found:*\n\n`;
+      result.templates.forEach((template, index) => {
+        response += `${index + 1}. *${template.name}*\n`;
+      });
+      response += `\n_Please be more specific or reply with a number._`;
+      return response;
+    } else {
+      return `❌ ${result.message}\n\n_Try again with a template name or number, or /cancel to abort._`;
+    }
+  }
+
+  if (!selectedTemplate) {
+    return `❌ Could not find that template. Please try again or /cancel to abort.`;
+  }
+
+  // Start journaling with selected template
+  return startTemplateJournaling(chatId, selectedTemplate);
+}
+
+/**
+ * Handle template section content state
+ */
+async function handleAwaitingTemplateSection(
+  chatId: string,
+  userId: string,
+  text: string,
+  pendingTemplate: {
+    template_id?: string;
+    template_name?: string;
+    sections?: Array<{ id: string; name: string; icon: string; color: string; order_index: number }>;
+    current_section_index?: number;
+    collected_sections?: Record<string, string>;
+    date?: string;
+  }
+): Promise<string> {
+  const { template_id, template_name, sections, current_section_index, collected_sections, date } = pendingTemplate;
+
+  if (!template_id || !sections || current_section_index === undefined) {
+    resetState(chatId);
+    return "❌ Something went wrong. Please start over.";
+  }
+
+  const currentSection = sections[current_section_index];
+  const isSkip = text.toLowerCase() === '/skip';
+
+  // Update collected sections (unless skipping)
+  const updatedCollectedSections = { ...collected_sections };
+  if (!isSkip && text.trim().length > 0) {
+    updatedCollectedSections[currentSection.id] = text;
+  }
+
+  const nextIndex = current_section_index + 1;
+
+  if (nextIndex >= sections.length) {
+    // All sections completed - save the entry
+    resetState(chatId);
+
+    const result = await createTemplateJournalEntry(
+      userId,
+      template_id,
+      sections,
+      updatedCollectedSections,
+      date
+    );
+
+    if (result.success) {
+      const filledCount = Object.keys(updatedCollectedSections).length;
+      return (
+        `✅ *Journal entry saved!*\n\n` +
+        `📓 Template: ${template_name}\n` +
+        `📝 Sections filled: ${filledCount}/${sections.length}\n\n` +
+        `_Your entry has been saved to the web app._`
+      );
+    }
+
+    return `❌ ${result.message}`;
+  }
+
+  // Move to next section
+  const nextSection = sections[nextIndex];
+
+  setState(chatId, 'AWAITING_TEMPLATE_SECTION', undefined, undefined, undefined, {
+    template_id,
+    template_name,
+    sections,
+    current_section_index: nextIndex,
+    collected_sections: updatedCollectedSections,
+    date,
+  });
+
+  let response = `${isSkip ? '⏭️ Skipped\n\n' : '✅ Saved\n\n'}`;
+  response += `Section ${nextIndex + 1}/${sections.length}\n`;
+  response += `${nextSection.icon || '📝'} *${nextSection.name}*\n\n`;
+
+  response += `_Type your entry, /skip to skip, or /cancel to abort._`;
+
+  return response;
 }

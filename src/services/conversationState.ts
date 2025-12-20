@@ -10,6 +10,7 @@ import {
   PendingTodoData,
   PendingJournalData,
   PendingNoteData,
+  PendingTemplateData,
   DEFAULT_STATE,
 } from '../types/conversation.js';
 
@@ -50,7 +51,8 @@ export function setState(
   newState: ConversationStateType,
   pendingTodo?: Partial<PendingTodoData>,
   pendingJournal?: Partial<PendingJournalData>,
-  pendingNote?: Partial<PendingNoteData>
+  pendingNote?: Partial<PendingNoteData>,
+  pendingTemplate?: Partial<PendingTemplateData>
 ): ConversationState {
   const currentState = getState(chatId);
   const now = Date.now();
@@ -69,6 +71,10 @@ export function setState(
       ...currentState.pendingNote,
       ...pendingNote,
     },
+    pendingTemplate: {
+      ...currentState.pendingTemplate,
+      ...pendingTemplate,
+    },
     lastUpdated: now,
     expiresAt: now + STATE_EXPIRATION_MS,
   };
@@ -79,6 +85,7 @@ export function setState(
     pendingTodo: updatedState.pendingTodo,
     pendingJournal: updatedState.pendingJournal,
     pendingNote: updatedState.pendingNote,
+    pendingTemplate: updatedState.pendingTemplate,
   });
 
   return updatedState;
@@ -127,9 +134,19 @@ export function getStateDescription(state: ConversationStateType): string {
     AWAITING_JOURNAL_CONTENT: 'Waiting for journal content',
     AWAITING_NOTE_TITLE: 'Waiting for note title',
     AWAITING_NOTE_CONTENT: 'Waiting for note content',
+    AWAITING_TEMPLATE_SELECTION: 'Waiting for template selection',
+    AWAITING_TEMPLATE_SECTION: 'Waiting for template section content',
     CHATTING: 'In conversation',
   };
   return descriptions[state];
+}
+
+/**
+ * Update pending template data without changing state
+ */
+export function updatePendingTemplate(chatId: string, data: Partial<PendingTemplateData>): void {
+  const state = getState(chatId);
+  setState(chatId, state.state, undefined, undefined, undefined, data);
 }
 
 /**

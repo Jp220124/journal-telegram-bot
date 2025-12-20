@@ -9,6 +9,8 @@ export type ConversationStateType =
   | 'AWAITING_JOURNAL_CONTENT'
   | 'AWAITING_NOTE_TITLE'
   | 'AWAITING_NOTE_CONTENT'
+  | 'AWAITING_TEMPLATE_SELECTION'
+  | 'AWAITING_TEMPLATE_SECTION'
   | 'CHATTING';
 
 export interface PendingTodoData {
@@ -31,11 +33,29 @@ export interface PendingNoteData {
   folder_name?: string;
 }
 
+export interface TemplateSection {
+  id: string;
+  name: string;
+  icon: string;
+  color: string;
+  order_index: number;
+}
+
+export interface PendingTemplateData {
+  template_id?: string;
+  template_name?: string;
+  sections?: TemplateSection[];
+  current_section_index?: number;
+  collected_sections?: Record<string, string>; // section_id -> content
+  date?: string;
+}
+
 export interface ConversationState {
   state: ConversationStateType;
   pendingTodo: PendingTodoData;
   pendingJournal: PendingJournalData;
   pendingNote: PendingNoteData;
+  pendingTemplate: PendingTemplateData;
   lastUpdated: number; // timestamp
   expiresAt: number; // timestamp
 }
@@ -45,6 +65,7 @@ export const DEFAULT_STATE: ConversationState = {
   pendingTodo: {},
   pendingJournal: {},
   pendingNote: {},
+  pendingTemplate: {},
   lastUpdated: Date.now(),
   expiresAt: Date.now() + 5 * 60 * 1000, // 5 minutes
 };

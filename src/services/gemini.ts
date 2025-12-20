@@ -323,6 +323,34 @@ function buildIntentTools(userCategories: string[]) {
   {
     type: 'function' as const,
     function: {
+      name: 'query_templates',
+      description: "Get/list user's journal templates. Use this when the user wants to see their templates, check what templates they have, or list available journaling templates.",
+      parameters: {
+        type: 'object',
+        properties: {},
+      },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'journal_template',
+      description: 'Start journaling using a specific template. Use this when the user wants to write a journal entry using a template, journal with a template, or use a specific template for their journal.',
+      parameters: {
+        type: 'object',
+        properties: {
+          template_name: {
+            type: 'string',
+            description: 'The name of the template to use for journaling. Can be a partial match.',
+          },
+        },
+        required: ['template_name'],
+      },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
       name: 'general_chat',
       description: "General conversation that doesn't match other intents. Use this for greetings, questions, or when the user is just chatting.",
       parameters: {
@@ -341,7 +369,7 @@ function buildIntentTools(userCategories: string[]) {
 }
 
 export interface ParsedIntent {
-  intent: 'add_todo' | 'add_multiple_todos' | 'add_journal' | 'query_todos' | 'mark_complete' | 'delete_todo' | 'edit_todo' | 'log_mood' | 'add_note' | 'query_notes' | 'read_note' | 'manage_note' | 'edit_note' | 'general_chat';
+  intent: 'add_todo' | 'add_multiple_todos' | 'add_journal' | 'query_todos' | 'mark_complete' | 'delete_todo' | 'edit_todo' | 'log_mood' | 'add_note' | 'query_notes' | 'read_note' | 'manage_note' | 'edit_note' | 'query_templates' | 'journal_template' | 'general_chat';
   parameters: Record<string, string | string[] | undefined>;
   confidence: 'high' | 'medium' | 'low';
   isComplete: boolean; // Whether all required data is present for execution
@@ -648,8 +676,11 @@ Analyze the user's CURRENT message and call the most appropriate function.`;
         // Need note title and content to add
         isComplete = !!args.note_title && args.note_title.trim().length > 0 &&
                      !!args.content_to_add && args.content_to_add.trim().length > 0;
+      } else if (functionName === 'journal_template') {
+        // Need template name to start journaling
+        isComplete = !!args.template_name && args.template_name.trim().length > 0;
       }
-      // query_todos and query_notes are always complete (can list without filters)
+      // query_todos, query_notes, and query_templates are always complete (can list without filters)
 
       // Debug logging to track AI extraction
       console.log('[AI Intent Debug]', {

@@ -1537,4 +1537,240 @@ export async function getAllVerifiedIntegrations(): Promise<UserIntegration[]> {
   return data as UserIntegration[];
 }
 
+// =====================================================
+// Template Functions (Phase 4)
+// =====================================================
+
+export interface JournalTemplate {
+  id: string;
+  user_id: string;
+  name: string;
+  description: string | null;
+  icon: string;
+  color: string;
+  is_default: boolean;
+  is_active: boolean;
+  order_index: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface JournalTemplateSection {
+  id: string;
+  template_id: string;
+  user_id: string;
+  name: string;
+  description: string | null;
+  icon: string;
+  color: string;
+  order_index: number;
+  is_active: boolean;
+  created_at: string;
+}
+
+export interface JournalTemplateWithSections extends JournalTemplate {
+  journal_template_sections: JournalTemplateSection[];
+}
+
+/**
+ * Get user's journal templates
+ */
+export async function getUserTemplates(userId: string): Promise<JournalTemplate[]> {
+  const { data, error } = await supabase
+    .from('journal_templates')
+    .select('*')
+    .eq('user_id', userId)
+    .eq('is_active', true)
+    .order('order_index', { ascending: true });
+
+  if (error) {
+    console.error('Error fetching templates:', error);
+    return [];
+  }
+
+  return data as JournalTemplate[];
+}
+
+/**
+ * Get template with sections by ID
+ */
+export async function getTemplateWithSections(
+  userId: string,
+  templateId: string
+): Promise<JournalTemplateWithSections | null> {
+  const { data, error } = await supabase
+    .from('journal_templates')
+    .select(`
+      *,
+      journal_template_sections (*)
+    `)
+    .eq('id', templateId)
+    .eq('user_id', userId)
+    .single();
+
+  if (error) {
+    console.error('Error fetching template with sections:', error);
+    return null;
+  }
+
+  // Sort sections by order_index
+  if (data?.journal_template_sections) {
+    data.journal_template_sections.sort(
+      (a: JournalTemplateSection, b: JournalTemplateSection) => a.order_index - b.order_index
+    );
+    // Filter only active sections
+    data.journal_template_sections = data.journal_template_sections.filter(
+      (s: JournalTemplateSection) => s.is_active
+    );
+  }
+
+  return data as JournalTemplateWithSections;
+}
+
+/**
+ * Find template by name (case-insensitive partial match)
+ */
+export async function getTemplateByName(
+  userId: string,
+  templateName: string
+): Promise<{ success: boolean; template?: JournalTemplateWithSections; templates?: JournalTemplate[]; message: string }> {
+  const { data, error } = await supabase
+    .from('journal_templates')
+    .select('*')
+    .eq('user_id', userId)
+    .eq('is_active', true)
+    .ilike('name', `%${templateName}%`)
+    .limit(5);
+
+  if (error) {
+    console.error('Error finding template:', error);
+    return { success: false, message: 'Error searching for template' };
+  }
+
+  if (!data || data.length === 0) {
+    return { success: false, message: `No template found matching "${templateName}"` };
+  }
+
+  if (data.length === 1) {
+    // Get the template with sections
+    const templateWithSections = await getTemplateWithSections(userId, data[0].id);
+    if (templateWithSections) {
+      return { success: true, template: templateWithSections, message: 'Template found' };
+    }
+    return { success: false, message: 'Error loading template sections' };
+  }
+
+  // Multiple matches
+  return {
+    success: false,
+    templates: data as JournalTemplate[],
+    message: `Multiple templates found. Please be more specific:\n${data.map((t) => `- ${t.name}`).join('\n')}`,
+  };
+}
+
+/**
+ * Create a journal entry from template sections
+ */
+export async function createTemplateJournalEntry(
+  userId: string,
+  templateId: string,
+  sections: Array<{ id: string; name: string; icon: string; color: string }>,
+  sectionContents: Record<string, string>,
+  date?: string
+): Promise<{ success: boolean; message: string }> {
+  const entryDate = date || new Date().toISOString().split('T')[0];
+
+  // First, create or get the template entry
+  const { data: entryData, error: entryError } = await supabase
+    .from('journal_template_entries')
+    .upsert(
+      {
+        user_id: userId,
+        template_id: templateId,
+        date: entryDate,
+      },
+      {
+        onConflict: 'user_id,template_id,date',
+        ignoreDuplicates: false,
+      }
+    )
+    .select()
+    .single();
+
+  if (entryError) {
+    // Try to fetch existing entry if upsert had issues
+    const { data: existing } = await supabase
+      .from('journal_template_entries')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('template_id', templateId)
+      .eq('date', entryDate)
+      .single();
+
+    if (!existing) {
+      console.error('Error creating template entry:', entryError);
+      return { success: false, message: 'Error creating journal entry' };
+    }
+
+    // Use existing entry
+    const entryId = existing.id;
+
+    // Create section entries
+    for (const section of sections) {
+      const content = sectionContents[section.id];
+      if (!content) continue;
+
+      await supabase
+        .from('journal_template_section_entries')
+        .upsert(
+          {
+            entry_id: entryId,
+            section_id: section.id,
+            section_name: section.name,
+            section_icon: section.icon,
+            section_color: section.color,
+            content: content,
+          },
+          {
+            onConflict: 'entry_id,section_id',
+            ignoreDuplicates: false,
+          }
+        );
+    }
+
+    return { success: true, message: 'Template journal entry saved!' };
+  }
+
+  const entryId = entryData.id;
+
+  // Create section entries
+  for (const section of sections) {
+    const content = sectionContents[section.id];
+    if (!content) continue;
+
+    const { error: sectionError } = await supabase
+      .from('journal_template_section_entries')
+      .upsert(
+        {
+          entry_id: entryId,
+          section_id: section.id,
+          section_name: section.name,
+          section_icon: section.icon,
+          section_color: section.color,
+          content: content,
+        },
+        {
+          onConflict: 'entry_id,section_id',
+          ignoreDuplicates: false,
+        }
+      );
+
+    if (sectionError) {
+      console.error('Error creating section entry:', sectionError);
+    }
+  }
+
+  return { success: true, message: 'Template journal entry saved!' };
+}
+
 export { supabase };
