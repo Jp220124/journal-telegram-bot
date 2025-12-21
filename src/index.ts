@@ -29,6 +29,7 @@ import researchRouter from './routes/research.js';
 import { handleStart, handleLink, handleHelp, handleTasks, handleToday, handleUnlink, handleNotes, handleNewNote, handleStats, handleInsights } from './handlers/commands.js';
 import { handleTextMessage } from './handlers/message.js';
 import { handleVoiceMessage } from './handlers/voice.js';
+import { verifySupabaseConnection } from './services/supabase.js';
 
 // Research automation imports (conditional)
 let startResearchWorker: (() => void) | undefined;
@@ -168,6 +169,13 @@ const server = app.listen(config.port, async () => {
 ║  Research: ${researchStatus.padEnd(35)}║
 ╚═══════════════════════════════════════════════╝
   `);
+
+  // Verify Supabase connection on startup
+  const supabaseOk = await verifySupabaseConnection();
+  if (!supabaseOk) {
+    console.error('⚠️ WARNING: Supabase connection verification failed!');
+    console.error('Database operations may not work correctly.');
+  }
 
   // Set up webhook in production
   if (config.isProduction && config.webhookUrl) {

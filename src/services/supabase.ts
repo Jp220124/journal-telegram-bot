@@ -101,6 +101,33 @@ const supabase = createClient(config.supabaseUrl, config.supabaseServiceKey, {
 });
 
 /**
+ * Verify Supabase connection on startup
+ * This helps catch configuration issues early
+ */
+export async function verifySupabaseConnection(): Promise<boolean> {
+  try {
+    // Test the connection by querying system info
+    const { data, error } = await supabase
+      .from('user_integrations')
+      .select('count')
+      .limit(1);
+
+    if (error) {
+      console.error('[Supabase] Connection test FAILED:', error.message);
+      console.error('[Supabase] Check SUPABASE_URL and SUPABASE_SERVICE_KEY environment variables');
+      return false;
+    }
+
+    console.log('[Supabase] ✅ Connection verified successfully');
+    console.log('[Supabase] URL:', config.supabaseUrl.substring(0, 30) + '...');
+    return true;
+  } catch (err) {
+    console.error('[Supabase] Connection test threw exception:', err);
+    return false;
+  }
+}
+
+/**
  * Find user integration by Telegram chat ID
  */
 export async function findIntegrationByChatId(chatId: string): Promise<UserIntegration | null> {
@@ -280,14 +307,35 @@ export async function addTodo(
     return null;
   }
 
-  // Debug logging after successful insert - include category_id to verify it was saved
+  // Debug logging after successful insert
   console.log('[DB Insert Success] Todo created:', {
     id: data.id,
     title: data.title,
     user_id: data.user_id,
-    category_id: data.category_id,  // Check if category_id was actually saved
+    category_id: data.category_id,
     priority: data.priority,
   });
+
+  // VERIFICATION: Query the database to confirm the todo was actually persisted
+  const { data: verifyData, error: verifyError } = await supabase
+    .from('todos')
+    .select('id, title')
+    .eq('id', data.id)
+    .single();
+
+  if (verifyError || !verifyData) {
+    console.error('[DB CRITICAL] Todo insert appeared successful but verification failed!', {
+      insertedId: data.id,
+      insertedTitle: data.title,
+      verifyError: verifyError?.message || 'No data returned on verification',
+    });
+    // Still return the data since insert claimed success, but this log will help diagnose
+  } else {
+    console.log('[DB Verified] Todo confirmed in database:', {
+      id: verifyData.id,
+      title: verifyData.title,
+    });
+  }
 
   return data as Todo;
 }
