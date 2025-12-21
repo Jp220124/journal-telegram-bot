@@ -77,12 +77,30 @@ router.get('/api/research/jobs', authenticateRequest, async (req: Request, res: 
       .from('research_jobs')
       .select(`
         *,
-        todos (id, title, category_id),
-        notes (id, title)
+        todos!research_jobs_task_id_fkey (id, title, category_id)
       `)
       .eq('user_id', user.id)
       .order('created_at', { ascending: false })
       .limit(50);
+
+    // If jobs have generated notes, fetch them separately to avoid join issues
+    if (data && data.length > 0) {
+      const noteIds = data.filter(j => j.generated_note_id).map(j => j.generated_note_id);
+      if (noteIds.length > 0) {
+        const { data: notes } = await supabase
+          .from('notes')
+          .select('id, title')
+          .in('id', noteIds);
+
+        // Attach notes to jobs
+        const notesMap = new Map((notes || []).map(n => [n.id, n]));
+        for (const job of data) {
+          if (job.generated_note_id) {
+            (job as any).notes = notesMap.get(job.generated_note_id) || null;
+          }
+        }
+      }
+    }
 
     if (error) {
       console.error('Error fetching research jobs:', error);
