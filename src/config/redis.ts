@@ -3,11 +3,11 @@
  * Used for background job processing (research automation)
  */
 
-import IORedis from 'ioredis';
-import { config } from './env';
+import IORedis, { type RedisOptions } from 'ioredis';
+import { config } from './env.js';
 
 // Parse Redis URL and create connection options
-function parseRedisUrl(url: string): IORedis.RedisOptions {
+function parseRedisUrl(url: string): RedisOptions {
   try {
     const parsed = new URL(url);
     return {

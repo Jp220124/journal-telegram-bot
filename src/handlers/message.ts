@@ -44,6 +44,9 @@ import {
   setState,
   resetState,
 } from '../services/conversationState.js';
+import { config } from '../config/env.js';
+import { handleResearchTextInput, triggerResearchForTask } from './research.js';
+import { getCategoryAutomation } from '../services/researchDatabase.js';
 
 /**
  * Handle incoming text message with state machine
@@ -59,6 +62,15 @@ export async function handleTextMessage(msg: TelegramBot.Message): Promise<void>
     resetState(chatId);
     await sendMessage(chatId, '❌ Action cancelled. What would you like to do?');
     return;
+  }
+
+  // Check for research clarification input (handle before normal processing)
+  if (config.isResearchEnabled) {
+    const isResearchInput = await handleResearchTextInput(msg.chat.id, text);
+    if (isResearchInput) {
+      // Message was handled as research clarification
+      return;
+    }
   }
 
   // Check if user is linked
@@ -227,6 +239,23 @@ async function handleAwaitingTodoTitle(
 
   if (todo.due_date && todo.due_time) {
     response += "\n\n⏰ I'll remind you when it's due!";
+  }
+
+  // Check for research automation (async, non-blocking)
+  if (config.isResearchEnabled && todo.category_id) {
+    triggerResearchForTask({
+      taskId: todo.id,
+      taskName: todo.title,
+      taskDescription: todo.notes || undefined,
+      categoryId: todo.category_id,
+      userId,
+    }).then((result) => {
+      if (result.started) {
+        console.log(`🔬 Research triggered for task: ${todo.title}`);
+      }
+    }).catch((err) => {
+      console.error('Error triggering research:', err);
+    });
   }
 
   return response;
@@ -515,6 +544,23 @@ async function executeAddTodo(
     response += "\n\n⏰ I'll remind you when it's due!";
   }
 
+  // Check for research automation (async, non-blocking)
+  if (config.isResearchEnabled && todo.category_id) {
+    triggerResearchForTask({
+      taskId: todo.id,
+      taskName: todo.title,
+      taskDescription: todo.notes || undefined,
+      categoryId: todo.category_id,
+      userId,
+    }).then((result) => {
+      if (result.started) {
+        console.log(`🔬 Research triggered for task: ${todo.title}`);
+      }
+    }).catch((err) => {
+      console.error('Error triggering research:', err);
+    });
+  }
+
   return response;
 }
 
@@ -569,6 +615,27 @@ async function executeAddMultipleTodos(
 
   if (result.failed.length > 0) {
     response += `\n\n⚠️ Failed to add: ${result.failed.join(', ')}`;
+  }
+
+  // Trigger research for each created todo (async, non-blocking)
+  if (config.isResearchEnabled) {
+    for (const todo of result.todos) {
+      if (todo.category_id) {
+        triggerResearchForTask({
+          taskId: todo.id,
+          taskName: todo.title,
+          taskDescription: todo.notes || undefined,
+          categoryId: todo.category_id,
+          userId,
+        }).then((researchResult) => {
+          if (researchResult.started) {
+            console.log(`🔬 Research triggered for task: ${todo.title}`);
+          }
+        }).catch((err) => {
+          console.error('Error triggering research:', err);
+        });
+      }
+    }
   }
 
   return response;

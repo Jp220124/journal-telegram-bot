@@ -63,7 +63,7 @@ export async function searchWithTavily(
       searchDepth,
       topic,
       includeAnswer,
-      includeRawContent,
+      // Note: includeRawContent has been removed in newer Tavily SDK versions
       ...(includeDomains && { includeDomains }),
       ...(excludeDomains && { excludeDomains }),
     });

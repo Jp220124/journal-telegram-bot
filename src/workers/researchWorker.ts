@@ -7,6 +7,7 @@ import { Worker, Job } from 'bullmq';
 import { redisConnection } from '../config/redis.js';
 import {
   ResearchStage,
+  type ResearchJobStatus,
   type ResearchJobData,
   type ResearchJobResult,
   type TaskUnderstanding,
@@ -33,8 +34,8 @@ const QUEUE_NAME = 'research-automation';
 /**
  * Get status string from stage number
  */
-function getStatusFromStage(stage: ResearchStage): string {
-  const statusMap: Record<ResearchStage, string> = {
+function getStatusFromStage(stage: ResearchStage): ResearchJobStatus {
+  const statusMap: Record<ResearchStage, ResearchJobStatus> = {
     [ResearchStage.UNDERSTAND]: 'understanding',
     [ResearchStage.CLARIFY]: 'awaiting_clarification',
     [ResearchStage.RESEARCH]: 'researching',
@@ -337,7 +338,7 @@ async function processResearchJob(
           );
 
           // Save note to database
-          noteId = await createResearchNote({
+          const createdNoteId = await createResearchNote({
             userId,
             title: generatedNote.title,
             content: generatedNote.content,
@@ -345,9 +346,10 @@ async function processResearchJob(
             sources: generatedNote.sources,
           });
 
-          if (!noteId) {
+          if (!createdNoteId) {
             throw new Error('Failed to create research note');
           }
+          noteId = createdNoteId;
 
           // Link note to task
           await linkNoteToTask(taskId, noteId);

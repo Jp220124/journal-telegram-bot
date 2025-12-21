@@ -43,7 +43,9 @@ async function callOpenRouter(messages: OpenRouterMessage[]): Promise<string> {
     throw new Error(`OpenRouter API error: ${response.status} - ${error}`);
   }
 
-  const data = await response.json();
+  const data = (await response.json()) as {
+    choices: Array<{ message: { content?: string } }>;
+  };
   return data.choices[0]?.message?.content || '';
 }
 
