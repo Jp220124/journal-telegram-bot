@@ -14,6 +14,10 @@ import type {
 const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
 const MODEL = 'z-ai/glm-4.5-air:free';
 
+// Research brief word limits
+const MAX_WORDS = 500;
+const MAX_TOKENS = 1500;
+
 interface OpenRouterMessage {
   role: 'system' | 'user' | 'assistant';
   content: string;
@@ -34,7 +38,8 @@ async function callOpenRouter(messages: OpenRouterMessage[]): Promise<string> {
     body: JSON.stringify({
       model: MODEL,
       messages,
-      max_tokens: 4000, // Allow longer responses for comprehensive notes
+      max_tokens: MAX_TOKENS, // Concise, focused output
+      temperature: 0.7, // Balanced creativity and accuracy
     }),
   });
 
@@ -81,42 +86,54 @@ export async function synthesizeResearchNote(
   const focusText =
     focusAreas.length > 0 ? `Focus Areas: ${focusAreas.join(', ')}` : '';
 
-  const systemPrompt = `You are a research synthesizer. Create a comprehensive, well-structured research note based on the provided sources.
+  const systemPrompt = `You are an expert research analyst creating a CONCISE research brief. Your output must be scannable, actionable, and under ${MAX_WORDS} words.
 
-Your note should be:
-1. Well-organized with clear sections
-2. Factual and based on the sources provided
-3. Easy to read and understand
-4. Include relevant quotes or statistics when available
-5. Properly attribute information to sources
+STRICT OUTPUT FORMAT (use these exact section headers):
 
-Use Markdown formatting with:
-- # for main title
-- ## for section headers
-- ### for subsections
-- **bold** for emphasis
-- - for bullet points
-- > for notable quotes
-- [text](url) for source links
+## 🎯 TL;DR
+[One powerful sentence capturing the most important insight]
 
-Structure the note with these sections:
-1. Executive Summary (2-3 sentence overview)
-2. Key Findings (bullet points of most important information)
-3. Detailed Analysis (organized by topic/theme)
-4. Important Facts & Figures (if applicable)
-5. Recommendations/Next Steps (if applicable)
-6. Sources (numbered list of references)
+## 📊 Key Numbers
+• **[Number/Stat]** — [What it means in context]
+• **[Number/Stat]** — [What it means in context]
+• **[Number/Stat]** — [What it means in context]
+(Include 3-4 most impactful statistics or numbers from the research)
 
-Be comprehensive but concise. Focus on the most relevant and reliable information.`;
+## 💡 Top Insights
 
-  const userPrompt = `Research Topic: "${taskName}"
+### 1. [Insight Title]
+[2-3 sentences explaining this insight and why it matters] [1]
+
+### 2. [Insight Title]
+[2-3 sentences explaining this insight and why it matters] [2]
+
+### 3. [Insight Title]
+[2-3 sentences explaining this insight and why it matters] [3]
+
+## ⚡ Action Items
+• [Specific actionable recommendation based on research]
+• [Another actionable recommendation]
+• [Third actionable recommendation]
+
+## 📚 Top Sources
+Use [1], [2], [3] etc. for inline citations. List sources at the end.
+
+RULES:
+1. MAXIMUM ${MAX_WORDS} WORDS - be ruthlessly concise
+2. Every sentence must add unique value - NO filler
+3. Lead with insights, not background
+4. Use specific numbers and data points
+5. Make it actionable - what should the reader DO?
+6. Write for a busy professional who needs quick insights
+7. Use inline citations [1], [2], [3] to reference sources`;
+
+  const userPrompt = `RESEARCH TOPIC: "${taskName}"
 ${focusText}
 
-I have gathered information from ${researchData.results.length} sources. Please synthesize this into a comprehensive research note.
-
+SOURCES (${researchData.results.length} total):
 ${sourcesText}
 
-Create the research note now.`;
+Create a concise research brief following the exact format specified. Remember: MAXIMUM ${MAX_WORDS} words, focus on actionable insights.`;
 
   try {
     console.log(`📝 Synthesizing note for: "${taskName}"`);
