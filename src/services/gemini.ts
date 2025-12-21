@@ -6,7 +6,9 @@
 import { config } from '../config/env.js';
 
 const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
-const MODEL = 'z-ai/glm-4.5-air:free';
+// Use Google Gemini Flash - free and supports function calling
+// Fallback from z-ai/glm-4.5-air:free which was rate-limited
+const MODEL = 'google/gemini-2.0-flash-exp:free';
 
 // Default categories (fallback)
 const DEFAULT_CATEGORIES = ['Daily Recurring', 'One-Time Tasks', 'Work', 'Personal'];
