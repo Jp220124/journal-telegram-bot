@@ -43,15 +43,15 @@ export const researchQueueEvents = new QueueEvents(QUEUE_NAME, {
 });
 
 // Log queue events
-researchQueueEvents.on('completed', ({ jobId, returnvalue }) => {
+researchQueueEvents.on('completed', ({ jobId, returnvalue }: { jobId: string; returnvalue: any }) => {
   console.log(`✅ Research job ${jobId} completed:`, returnvalue);
 });
 
-researchQueueEvents.on('failed', ({ jobId, failedReason }) => {
+researchQueueEvents.on('failed', ({ jobId, failedReason }: { jobId: string; failedReason: string }) => {
   console.error(`❌ Research job ${jobId} failed:`, failedReason);
 });
 
-researchQueueEvents.on('progress', ({ jobId, data }) => {
+researchQueueEvents.on('progress', ({ jobId, data }: { jobId: string; data: any }) => {
   console.log(`📊 Research job ${jobId} progress:`, data);
 });
 

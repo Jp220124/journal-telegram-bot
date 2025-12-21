@@ -436,19 +436,19 @@ export const researchWorker = new Worker<ResearchJobData, ResearchJobResult>(
 );
 
 // Worker event handlers
-researchWorker.on('completed', (job, result) => {
+researchWorker.on('completed', (job: any, result: any) => {
   console.log(`✅ Worker completed job ${job.id}:`, result);
 });
 
-researchWorker.on('failed', (job, error) => {
+researchWorker.on('failed', (job: any, error: Error) => {
   console.error(`❌ Worker failed job ${job?.id}:`, error.message);
 });
 
-researchWorker.on('error', (error) => {
+researchWorker.on('error', (error: Error) => {
   console.error('❌ Worker error:', error);
 });
 
-researchWorker.on('stalled', (jobId) => {
+researchWorker.on('stalled', (jobId: string) => {
   console.warn(`⚠️ Job ${jobId} stalled`);
 });
 

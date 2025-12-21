@@ -68,7 +68,7 @@ export async function searchWithTavily(
       ...(excludeDomains && { excludeDomains }),
     });
 
-    const results: SearchResult[] = response.results.map((r) => ({
+    const results: SearchResult[] = response.results.map((r: any) => ({
       title: r.title || 'Untitled',
       url: r.url,
       content: r.rawContent || r.content || '',
@@ -143,7 +143,7 @@ export async function getAnswer(
       includeAnswer: true,
     });
 
-    const sources: SearchResult[] = response.results.map((r) => ({
+    const sources: SearchResult[] = response.results.map((r: any) => ({
       title: r.title || 'Untitled',
       url: r.url,
       content: r.content || '',

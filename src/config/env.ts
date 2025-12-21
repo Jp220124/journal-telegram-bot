@@ -30,9 +30,19 @@ export const config = {
   port: parseInt(process.env.PORT || '3000', 10),
   nodeEnv: process.env.NODE_ENV || 'development',
 
+  // Research Automation (optional)
+  redisUrl: getEnvVar('REDIS_URL', false),
+  exaApiKey: getEnvVar('EXA_API_KEY', false),
+  tavilyApiKey: getEnvVar('TAVILY_API_KEY', false),
+
   // Feature flags
   isProduction: process.env.NODE_ENV === 'production',
   isDevelopment: process.env.NODE_ENV !== 'production',
+
+  // Research automation is enabled if Redis URL is configured
+  get isResearchEnabled(): boolean {
+    return Boolean(this.redisUrl);
+  },
 } as const;
 
 export type Config = typeof config;

@@ -76,7 +76,7 @@ export async function searchWithExa(
       ...(excludeDomains && { excludeDomains }),
     });
 
-    const results: SearchResult[] = response.results.map((r) => ({
+    const results: SearchResult[] = response.results.map((r: any) => ({
       title: r.title || 'Untitled',
       url: r.url,
       content: r.text || r.highlights?.join('\n\n') || '',
@@ -162,7 +162,7 @@ export async function findSimilar(
       text: { maxCharacters: 2000 },
     });
 
-    return response.results.map((r) => ({
+    return response.results.map((r: any) => ({
       title: r.title || 'Untitled',
       url: r.url,
       content: r.text || '',

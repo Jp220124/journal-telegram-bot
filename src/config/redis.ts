@@ -44,7 +44,7 @@ redisConnection.on('connect', () => {
   console.log('✅ Redis connected successfully');
 });
 
-redisConnection.on('error', (err) => {
+redisConnection.on('error', (err: Error) => {
   console.error('❌ Redis connection error:', err.message);
 });
 
