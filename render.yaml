@@ -26,5 +26,25 @@ services:
         sync: false
       - key: WEBHOOK_URL
         generateValue: true # Will be set to the service URL
+      # Research Automation (optional - feature disabled if not set)
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: journal-redis
+          property: connectionString
+      - key: EXA_API_KEY
+        sync: false
+      - key: TAVILY_API_KEY
+        sync: false
+      - key: OPENROUTER_API_KEY
+        sync: false
     healthCheckPath: /health
     autoDeploy: true
+
+  # Redis for BullMQ job queue (Research Automation)
+  - type: redis
+    name: journal-redis
+    region: oregon
+    plan: free # 25MB, sufficient for job queue
+    maxmemoryPolicy: allkeys-lru
+    ipAllowList: [] # Only internal access

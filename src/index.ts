@@ -7,6 +7,7 @@
  * - Create and manage notes
  * - Query and complete tasks
  * - Due date reminders
+ * - Autonomous research automation
  *
  * Free Stack:
  * - Telegram Bot API (free)
@@ -26,6 +27,39 @@ import webhookRouter from './routes/webhook.js';
 import { handleStart, handleLink, handleHelp, handleTasks, handleToday, handleUnlink, handleNotes, handleNewNote, handleStats, handleInsights } from './handlers/commands.js';
 import { handleTextMessage } from './handlers/message.js';
 import { handleVoiceMessage } from './handlers/voice.js';
+
+// Research automation imports (conditional)
+let startResearchWorker: (() => void) | undefined;
+let stopResearchWorker: (() => Promise<void>) | undefined;
+let registerResearchHandlers: (() => void) | undefined;
+let closeQueue: (() => Promise<void>) | undefined;
+
+// Conditionally import research modules if enabled
+if (config.isResearchEnabled) {
+  import('./workers/researchWorker.js').then((module) => {
+    startResearchWorker = module.startResearchWorker;
+    stopResearchWorker = module.stopResearchWorker;
+    console.log('✅ Research worker module loaded');
+  }).catch((err) => {
+    console.error('Failed to load research worker:', err.message);
+  });
+
+  import('./handlers/research.js').then((module) => {
+    registerResearchHandlers = module.registerResearchHandlers;
+    // Register handlers immediately after loading
+    if (registerResearchHandlers) {
+      registerResearchHandlers();
+    }
+  }).catch((err) => {
+    console.error('Failed to load research handlers:', err.message);
+  });
+
+  import('./services/researchQueue.js').then((module) => {
+    closeQueue = module.closeQueue;
+  }).catch((err) => {
+    console.error('Failed to load research queue:', err.message);
+  });
+}
 
 // Create Express app
 const app = express();
@@ -107,12 +141,14 @@ bot.on('polling_error', (error) => {
 
 // Start server
 const server = app.listen(config.port, async () => {
+  const researchStatus = config.isResearchEnabled ? 'Enabled' : 'Disabled';
   console.log(`
 ╔═══════════════════════════════════════════════╗
 ║     Journal Telegram Bot Started! 🤖          ║
 ╠═══════════════════════════════════════════════╣
 ║  Port: ${String(config.port).padEnd(38)}║
 ║  Mode: ${(config.isProduction ? 'Production (Webhook)' : 'Development (Polling)').padEnd(38)}║
+║  Research: ${researchStatus.padEnd(35)}║
 ╚═══════════════════════════════════════════════╝
   `);
 
@@ -128,23 +164,48 @@ const server = app.listen(config.port, async () => {
   // Start notification processor
   startNotificationProcessor(60000); // Check every minute
   console.log('Notification processor started');
+
+  // Start research worker if enabled
+  if (config.isResearchEnabled && startResearchWorker) {
+    startResearchWorker();
+    console.log('🔬 Research worker started');
+  }
 });
+
+// Graceful shutdown handler
+async function gracefulShutdown(signal: string): Promise<void> {
+  console.log(`${signal} received, shutting down...`);
+
+  // Stop research worker and queue if enabled
+  if (config.isResearchEnabled) {
+    try {
+      if (stopResearchWorker) {
+        await stopResearchWorker();
+        console.log('Research worker stopped');
+      }
+      if (closeQueue) {
+        await closeQueue();
+        console.log('Research queue closed');
+      }
+    } catch (err) {
+      console.error('Error stopping research services:', err);
+    }
+  }
+
+  server.close(() => {
+    console.log('Server closed');
+    process.exit(0);
+  });
+
+  // Force exit after 10 seconds if graceful shutdown fails
+  setTimeout(() => {
+    console.error('Could not close connections in time, forcing shut down');
+    process.exit(1);
+  }, 10000);
+}
 
 // Graceful shutdown
-process.on('SIGTERM', () => {
-  console.log('SIGTERM received, shutting down...');
-  server.close(() => {
-    console.log('Server closed');
-    process.exit(0);
-  });
-});
-
-process.on('SIGINT', () => {
-  console.log('SIGINT received, shutting down...');
-  server.close(() => {
-    console.log('Server closed');
-    process.exit(0);
-  });
-});
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
 export { app };

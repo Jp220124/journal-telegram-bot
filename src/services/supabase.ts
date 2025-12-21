@@ -117,6 +117,22 @@ export async function findIntegrationByChatId(chatId: string): Promise<UserInteg
 }
 
 /**
+ * Find user integration by user ID
+ */
+export async function findIntegrationByUserId(userId: string): Promise<UserIntegration | null> {
+  const { data, error } = await supabase
+    .from('user_integrations')
+    .select('*')
+    .eq('user_id', userId)
+    .eq('platform', 'telegram')
+    .eq('is_verified', true)
+    .single();
+
+  if (error || !data) return null;
+  return data as UserIntegration;
+}
+
+/**
  * Verify a Telegram chat with a verification code
  */
 export async function verifyTelegramChat(
