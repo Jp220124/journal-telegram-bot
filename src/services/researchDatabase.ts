@@ -400,6 +400,14 @@ export async function createResearchNote(params: {
   sources: SourceReference[];
   folderId?: string;
 }): Promise<string | null> {
+  console.log(`📝 createResearchNote() called:`, {
+    userId: params.userId,
+    title: params.title,
+    contentLength: params.content.length,
+    researchJobId: params.researchJobId,
+    sourcesCount: params.sources.length,
+  });
+
   // Create TipTap JSON content structure
   const tipTapContent = {
     type: 'doc',
@@ -411,26 +419,40 @@ export async function createResearchNote(params: {
     ],
   };
 
+  const insertData = {
+    user_id: params.userId,
+    title: params.title,
+    content: tipTapContent,
+    content_text: params.content,
+    folder_id: params.folderId || null,
+    research_job_id: params.researchJobId,
+    source_type: 'research',
+    sources: params.sources,
+    word_count: params.content.split(/\s+/).length,
+  };
+
+  console.log(`   📤 Inserting into notes table with fields:`, {
+    ...insertData,
+    content: '[TipTap JSON]',
+    content_text: `[${insertData.content_text.length} chars]`,
+  });
+
   const { data, error } = await supabase
     .from('notes')
-    .insert({
-      user_id: params.userId,
-      title: params.title,
-      content: tipTapContent,
-      content_text: params.content,
-      folder_id: params.folderId || null,
-      research_job_id: params.researchJobId,
-      source_type: 'research',
-      sources: params.sources,
-      word_count: params.content.split(/\s+/).length,
-    })
+    .insert(insertData)
     .select('id')
     .single();
 
   if (error) {
-    console.error('Error creating research note:', error);
+    console.error('❌ Error creating research note:', error);
     return null;
   }
+
+  console.log(`   ✅ Note created successfully:`, {
+    noteId: data.id,
+    research_job_id: params.researchJobId,
+    source_type: 'research',
+  });
 
   return data.id;
 }
@@ -446,17 +468,29 @@ export async function linkNoteToTask(
   taskId: string,
   noteId: string
 ): Promise<boolean> {
-  const { error } = await supabase.from('task_note_links').insert({
+  console.log(`🔗 linkNoteToTask() called:`, { taskId, noteId });
+
+  const linkData = {
     task_id: taskId,
     note_id: noteId,
     link_type: 'research',
     created_at: new Date().toISOString(),
-  });
+  };
+
+  console.log(`   📤 Inserting into task_note_links:`, linkData);
+
+  const { error } = await supabase.from('task_note_links').insert(linkData);
 
   if (error) {
-    console.error('Error linking note to task:', error);
+    console.error('❌ Error linking note to task:', error);
     return false;
   }
+
+  console.log(`   ✅ Task-note link created successfully:`, {
+    taskId,
+    noteId,
+    linkType: 'research',
+  });
 
   return true;
 }

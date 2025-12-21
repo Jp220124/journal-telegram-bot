@@ -325,19 +325,23 @@ async function processResearchJob(
         // ========================================
         case ResearchStage.SYNTHESIZE: {
           console.log(`📝 Stage 4: Synthesizing research note`);
+          console.log(`   📊 Research data sources: ${researchData?.results?.length || 0}`);
 
           if (!researchData) {
             throw new Error('No research data for synthesis');
           }
 
           // Generate the note
+          console.log(`   🧠 Generating note with LLM...`);
           generatedNote = await synthesizeResearchNote(
             taskName,
             researchData,
             understanding?.suggestedFocusAreas || []
           );
+          console.log(`   ✅ Note generated: "${generatedNote.title}" (${generatedNote.content.length} chars)`);
 
           // Save note to database
+          console.log(`   💾 Creating note in database...`);
           const createdNoteId = await createResearchNote({
             userId,
             title: generatedNote.title,
@@ -350,14 +354,22 @@ async function processResearchJob(
             throw new Error('Failed to create research note');
           }
           noteId = createdNoteId;
+          console.log(`   ✅ Note created with ID: ${noteId}`);
 
           // Link note to task
-          await linkNoteToTask(taskId, noteId);
+          console.log(`   🔗 Linking note to task ${taskId}...`);
+          const linkSuccess = await linkNoteToTask(taskId, noteId);
+          if (linkSuccess) {
+            console.log(`   ✅ Note linked to task successfully (link_type: 'research')`);
+          } else {
+            console.warn(`   ⚠️ Failed to link note to task`);
+          }
 
           // Update research job with note ID
           await updateResearchJob(researchJobId, {
             generated_note_id: noteId,
           });
+          console.log(`   ✅ Research job updated with generated_note_id: ${noteId}`);
 
           stage = ResearchStage.NOTIFY;
           break;
