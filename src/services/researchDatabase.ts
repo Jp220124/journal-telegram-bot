@@ -447,8 +447,9 @@ export async function linkNoteToTask(
   noteId: string
 ): Promise<boolean> {
   const { error } = await supabase.from('task_note_links').insert({
-    todo_id: taskId,
+    task_id: taskId,
     note_id: noteId,
+    link_type: 'research',
     created_at: new Date().toISOString(),
   });
 

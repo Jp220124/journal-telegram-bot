@@ -22,6 +22,7 @@ import { getBot, setWebhook, deleteWebhook } from './services/telegram.js';
 import { startNotificationProcessor } from './services/notifications.js';
 import healthRouter from './routes/health.js';
 import webhookRouter from './routes/webhook.js';
+import researchRouter from './routes/research.js';
 
 // Import handlers
 import { handleStart, handleLink, handleHelp, handleTasks, handleToday, handleUnlink, handleNotes, handleNewNote, handleStats, handleInsights } from './handlers/commands.js';
@@ -68,6 +69,7 @@ app.use(express.json());
 // Mount routes
 app.use(healthRouter);
 app.use(webhookRouter);
+app.use(researchRouter);
 
 // Get the bot instance
 const bot = getBot();
