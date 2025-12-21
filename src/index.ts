@@ -17,6 +17,7 @@
  */
 
 import express from 'express';
+import cors from 'cors';
 import { config } from './config/env.js';
 import { getBot, setWebhook, deleteWebhook } from './services/telegram.js';
 import { startNotificationProcessor } from './services/notifications.js';
@@ -64,6 +65,20 @@ if (config.isResearchEnabled) {
 
 // Create Express app
 const app = express();
+
+// CORS configuration - allow requests from web app
+app.use(cors({
+  origin: [
+    'http://localhost:3000',
+    'https://claude-journal.priyanshukumarmaurya786.workers.dev',
+    'https://claude-journal.pages.dev',
+    /\.pages\.dev$/,  // Allow all Cloudflare Pages preview URLs
+  ],
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+}));
+
 app.use(express.json());
 
 // Mount routes
