@@ -72,29 +72,49 @@ router.get('/api/research/jobs', authenticateRequest, async (req: Request, res: 
   try {
     const user = (req as any).user;
 
-    // Get all jobs (not just pending)
-    const { data, error } = await supabase
+    // Get all jobs - simple query without joins first
+    const { data: jobs, error } = await supabase
       .from('research_jobs')
-      .select(`
-        *,
-        todos!research_jobs_task_id_fkey (id, title, category_id)
-      `)
+      .select('*')
       .eq('user_id', user.id)
       .order('created_at', { ascending: false })
       .limit(50);
 
-    // If jobs have generated notes, fetch them separately to avoid join issues
-    if (data && data.length > 0) {
-      const noteIds = data.filter(j => j.generated_note_id).map(j => j.generated_note_id);
+    if (error) {
+      console.error('Error fetching research jobs:', error);
+      return res.status(500).json({ error: 'Failed to fetch research jobs', details: error.message });
+    }
+
+    // Enrich with task and note info if we have jobs
+    const enrichedJobs = jobs || [];
+
+    if (enrichedJobs.length > 0) {
+      // Fetch todos for these jobs
+      const taskIds = enrichedJobs.filter(j => j.task_id).map(j => j.task_id);
+      if (taskIds.length > 0) {
+        const { data: todos } = await supabase
+          .from('todos')
+          .select('id, title, category_id')
+          .in('id', taskIds);
+
+        const todosMap = new Map((todos || []).map(t => [t.id, t]));
+        for (const job of enrichedJobs) {
+          if (job.task_id) {
+            (job as any).todos = todosMap.get(job.task_id) || null;
+          }
+        }
+      }
+
+      // Fetch notes for completed jobs
+      const noteIds = enrichedJobs.filter(j => j.generated_note_id).map(j => j.generated_note_id);
       if (noteIds.length > 0) {
         const { data: notes } = await supabase
           .from('notes')
           .select('id, title')
           .in('id', noteIds);
 
-        // Attach notes to jobs
         const notesMap = new Map((notes || []).map(n => [n.id, n]));
-        for (const job of data) {
+        for (const job of enrichedJobs) {
           if (job.generated_note_id) {
             (job as any).notes = notesMap.get(job.generated_note_id) || null;
           }
@@ -102,12 +122,7 @@ router.get('/api/research/jobs', authenticateRequest, async (req: Request, res: 
       }
     }
 
-    if (error) {
-      console.error('Error fetching research jobs:', error);
-      return res.status(500).json({ error: 'Failed to fetch research jobs' });
-    }
-
-    res.json({ jobs: data || [] });
+    res.json({ jobs: enrichedJobs });
   } catch (err) {
     console.error('Error:', err);
     res.status(500).json({ error: 'Internal server error' });
