@@ -524,6 +524,7 @@ async function callOpenRouter(
   const body: Record<string, unknown> = {
     model: MODEL,
     messages,
+    stream: false, // Explicitly disable streaming - required for tool calling with some models
   };
 
   if (tools) {
