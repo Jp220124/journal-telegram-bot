@@ -11,6 +11,7 @@ import {
   PendingJournalData,
   PendingNoteData,
   PendingTemplateData,
+  PendingTaskPhotoData,
   DEFAULT_STATE,
 } from '../types/conversation.js';
 
@@ -52,7 +53,8 @@ export function setState(
   pendingTodo?: Partial<PendingTodoData>,
   pendingJournal?: Partial<PendingJournalData>,
   pendingNote?: Partial<PendingNoteData>,
-  pendingTemplate?: Partial<PendingTemplateData>
+  pendingTemplate?: Partial<PendingTemplateData>,
+  pendingTaskPhoto?: Partial<PendingTaskPhotoData>
 ): ConversationState {
   const currentState = getState(chatId);
   const now = Date.now();
@@ -75,6 +77,10 @@ export function setState(
       ...currentState.pendingTemplate,
       ...pendingTemplate,
     },
+    pendingTaskPhoto: {
+      ...currentState.pendingTaskPhoto,
+      ...pendingTaskPhoto,
+    },
     lastUpdated: now,
     expiresAt: now + STATE_EXPIRATION_MS,
   };
@@ -86,6 +92,7 @@ export function setState(
     pendingJournal: updatedState.pendingJournal,
     pendingNote: updatedState.pendingNote,
     pendingTemplate: updatedState.pendingTemplate,
+    pendingTaskPhoto: updatedState.pendingTaskPhoto,
   });
 
   return updatedState;
@@ -136,6 +143,7 @@ export function getStateDescription(state: ConversationStateType): string {
     AWAITING_NOTE_CONTENT: 'Waiting for note content',
     AWAITING_TEMPLATE_SELECTION: 'Waiting for template selection',
     AWAITING_TEMPLATE_SECTION: 'Waiting for template section content',
+    AWAITING_TASK_PHOTO: 'Waiting for task photo',
     CHATTING: 'In conversation',
   };
   return descriptions[state];

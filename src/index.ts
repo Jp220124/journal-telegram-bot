@@ -17,19 +17,17 @@
  */
 
 import express from 'express';
-import cors from 'cors';
 import { config } from './config/env.js';
 import { getBot, setWebhook, deleteWebhook } from './services/telegram.js';
 import { startNotificationProcessor } from './services/notifications.js';
 import healthRouter from './routes/health.js';
 import webhookRouter from './routes/webhook.js';
-import researchRouter from './routes/research.js';
 
 // Import handlers
 import { handleStart, handleLink, handleHelp, handleTasks, handleToday, handleUnlink, handleNotes, handleNewNote, handleStats, handleInsights } from './handlers/commands.js';
 import { handleTextMessage } from './handlers/message.js';
 import { handleVoiceMessage } from './handlers/voice.js';
-import { verifySupabaseConnection } from './services/supabase.js';
+import { handlePhotoMessage } from './handlers/photo.js';
 
 // Research automation imports (conditional)
 let startResearchWorker: (() => void) | undefined;
@@ -66,26 +64,11 @@ if (config.isResearchEnabled) {
 
 // Create Express app
 const app = express();
-
-// CORS configuration - allow requests from web app
-app.use(cors({
-  origin: [
-    'http://localhost:3000',
-    'https://claude-journal.priyanshukumarmaurya786.workers.dev',
-    'https://claude-journal.pages.dev',
-    /\.pages\.dev$/,  // Allow all Cloudflare Pages preview URLs
-  ],
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
-}));
-
 app.use(express.json());
 
 // Mount routes
 app.use(healthRouter);
 app.use(webhookRouter);
-app.use(researchRouter);
 
 // Get the bot instance
 const bot = getBot();
@@ -121,6 +104,9 @@ bot.on('message', async (msg) => {
 
 // Handle voice messages
 bot.on('voice', handleVoiceMessage);
+
+// Handle photo messages
+bot.on('photo', handlePhotoMessage);
 
 // Handle callback queries (inline keyboard buttons)
 bot.on('callback_query', async (query) => {
@@ -169,13 +155,6 @@ const server = app.listen(config.port, async () => {
 ║  Research: ${researchStatus.padEnd(35)}║
 ╚═══════════════════════════════════════════════╝
   `);
-
-  // Verify Supabase connection on startup
-  const supabaseOk = await verifySupabaseConnection();
-  if (!supabaseOk) {
-    console.error('⚠️ WARNING: Supabase connection verification failed!');
-    console.error('Database operations may not work correctly.');
-  }
 
   // Set up webhook in production
   if (config.isProduction && config.webhookUrl) {

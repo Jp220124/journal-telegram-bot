@@ -44,6 +44,7 @@ import {
   setState,
   resetState,
 } from '../services/conversationState.js';
+import type { PendingTaskPhotoData } from '../types/conversation.js';
 import { config } from '../config/env.js';
 import { handleResearchTextInput, triggerResearchForTask } from './research.js';
 import { getCategoryAutomation } from '../services/researchDatabase.js';
@@ -131,6 +132,12 @@ export async function handleTextMessage(msg: TelegramBot.Message): Promise<void>
         // User is providing content for a template section
         response = await handleAwaitingTemplateSection(chatId, integration.user_id, text, conversationState.pendingTemplate);
         intentForHistory = 'journal_template';
+        break;
+
+      case 'AWAITING_TASK_PHOTO':
+        // User is selecting a task by number to add photo to
+        response = await handleAwaitingTaskPhotoSelection(chatId, integration.user_id, text);
+        intentForHistory = 'add_task_photo';
         break;
 
       case 'IDLE':
@@ -491,6 +498,9 @@ export async function executeIntent(chatId: string, userId: string, intent: Pars
 
     case 'query_recurring':
       return executeQueryRecurring(chatId, userId);
+
+    case 'add_task_photo':
+      return executeAddTaskPhoto(chatId, userId, params);
 
     case 'general_chat':
     default:
@@ -1485,4 +1495,107 @@ async function executeQueryRecurring(
   response += `\n📊 Progress: ${completed.length}/${result.tasks.length} (${completionRate}%)`;
 
   return response;
+}
+
+// =====================================================
+// Task Photo Execute Functions
+// =====================================================
+
+/**
+ * Handle task selection by number when in AWAITING_TASK_PHOTO state
+ */
+async function handleAwaitingTaskPhotoSelection(
+  chatId: string,
+  userId: string,
+  text: string
+): Promise<string> {
+  // Check if input is a number
+  const num = parseInt(text.trim(), 10);
+
+  if (isNaN(num) || num < 1) {
+    return "❓ Please enter a task number from the list, or /cancel to abort.";
+  }
+
+  // Get user's pending tasks again
+  const todos = await getUserTodos(userId, 'pending');
+  const tasksToShow = todos.slice(0, 10);
+
+  if (num > tasksToShow.length) {
+    return `❌ Invalid number. Please choose a number between 1 and ${tasksToShow.length}, or /cancel to abort.`;
+  }
+
+  const selectedTask = tasksToShow[num - 1];
+
+  // Update state with selected task
+  setState(chatId, 'AWAITING_TASK_PHOTO', undefined, undefined, undefined, undefined, {
+    taskId: selectedTask.id,
+    taskTitle: selectedTask.title,
+  });
+
+  return `📷 *Ready to add photo!*\n\n` +
+    `Task: *${selectedTask.title}*\n\n` +
+    `_Send the photo now, or /cancel to abort._`;
+}
+
+/**
+ * Execute add_task_photo intent - add photo to an existing task
+ */
+async function executeAddTaskPhoto(
+  chatId: string,
+  userId: string,
+  params: Record<string, string | undefined>
+): Promise<string> {
+  const taskIdentifier = params.task_identifier;
+
+  if (!taskIdentifier) {
+    // No task specified - show recent pending tasks
+    const todos = await getUserTodos(userId, 'pending');
+
+    if (todos.length === 0) {
+      return "📷 *Add Photo to Task*\n\n" +
+        "You don't have any pending tasks to attach a photo to.\n\n" +
+        "_Create a task first, or send a photo with a caption to create a new task with the photo._";
+    }
+
+    // Show task list and set state to await task selection (via text number)
+    let response = "📷 *Add Photo to Task*\n\n" +
+      "Which task would you like to add a photo to?\n\n";
+
+    const tasksToShow = todos.slice(0, 10);
+    tasksToShow.forEach((todo, i) => {
+      response += `${i + 1}. ${todo.title}\n`;
+    });
+
+    response += "\n_Reply with the task number, then send the photo._\n" +
+      "_Or /cancel to abort._";
+
+    // Store the task list in state for later reference
+    // We'll use a simple approach: store task IDs mapped to numbers
+    setState(chatId, 'AWAITING_TASK_PHOTO', undefined, undefined, undefined, undefined, {
+      // We'll handle number selection in photo handler
+    });
+
+    return response;
+  }
+
+  // Task identifier provided - find the task
+  const todos = await getUserTodos(userId, 'pending');
+  const matchedTask = todos.find(
+    (t) => t.title.toLowerCase().includes(taskIdentifier.toLowerCase())
+  );
+
+  if (!matchedTask) {
+    return `❌ Couldn't find a task matching "${taskIdentifier}".\n\n` +
+      `_Try again with a different task name, or say "add photo" to see your tasks._`;
+  }
+
+  // Set state to await photo for this specific task
+  setState(chatId, 'AWAITING_TASK_PHOTO', undefined, undefined, undefined, undefined, {
+    taskId: matchedTask.id,
+    taskTitle: matchedTask.title,
+  });
+
+  return `📷 *Ready to add photo!*\n\n` +
+    `Task: *${matchedTask.title}*\n\n` +
+    `_Send the photo now, or /cancel to abort._`;
 }

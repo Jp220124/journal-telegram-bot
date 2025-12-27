@@ -6,9 +6,7 @@
 import { config } from '../config/env.js';
 
 const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
-// Use Llama 3.3 70B - free and supports function calling
-// Fallback from google/gemini-2.0-flash-exp:free which was also rate-limited
-const MODEL = 'meta-llama/llama-3.3-70b-instruct:free';
+const MODEL = 'z-ai/glm-4.5-air:free';
 
 // Default categories (fallback)
 const DEFAULT_CATEGORIES = ['Daily Recurring', 'One-Time Tasks', 'Work', 'Personal'];
@@ -381,6 +379,22 @@ function buildIntentTools(userCategories: string[]) {
   {
     type: 'function' as const,
     function: {
+      name: 'add_task_photo',
+      description: 'Add/attach a photo to an existing task. Use this when the user wants to add a photo/image to a task, attach an image to a task, upload a photo for a task.',
+      parameters: {
+        type: 'object',
+        properties: {
+          task_identifier: {
+            type: 'string',
+            description: 'Task title or partial match to identify the task to attach photo to. If not specified, will show list of recent tasks.',
+          },
+        },
+      },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
       name: 'general_chat',
       description: "General conversation that doesn't match other intents. Use this for greetings, questions, or when the user is just chatting.",
       parameters: {
@@ -399,7 +413,7 @@ function buildIntentTools(userCategories: string[]) {
 }
 
 export interface ParsedIntent {
-  intent: 'add_todo' | 'add_multiple_todos' | 'add_journal' | 'query_todos' | 'mark_complete' | 'delete_todo' | 'edit_todo' | 'log_mood' | 'add_note' | 'query_notes' | 'read_note' | 'manage_note' | 'edit_note' | 'query_templates' | 'journal_template' | 'query_calendar' | 'query_recurring' | 'general_chat';
+  intent: 'add_todo' | 'add_multiple_todos' | 'add_journal' | 'query_todos' | 'mark_complete' | 'delete_todo' | 'edit_todo' | 'log_mood' | 'add_note' | 'query_notes' | 'read_note' | 'manage_note' | 'edit_note' | 'query_templates' | 'journal_template' | 'query_calendar' | 'query_recurring' | 'add_task_photo' | 'general_chat';
   parameters: Record<string, string | string[] | undefined>;
   confidence: 'high' | 'medium' | 'low';
   isComplete: boolean; // Whether all required data is present for execution
@@ -524,7 +538,6 @@ async function callOpenRouter(
   const body: Record<string, unknown> = {
     model: MODEL,
     messages,
-    stream: false, // Explicitly disable streaming - required for tool calling with some models
   };
 
   if (tools) {
@@ -710,6 +723,9 @@ Analyze the user's CURRENT message and call the most appropriate function.`;
       } else if (functionName === 'journal_template') {
         // Need template name to start journaling
         isComplete = !!args.template_name && args.template_name.trim().length > 0;
+      } else if (functionName === 'add_task_photo') {
+        // Task photo is always complete - if no task specified, we'll show a list
+        isComplete = true;
       }
       // query_todos, query_notes, and query_templates are always complete (can list without filters)
 

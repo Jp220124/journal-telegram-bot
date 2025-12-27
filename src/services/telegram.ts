@@ -99,6 +99,40 @@ export async function downloadVoiceFile(fileId: string): Promise<Buffer | null> 
 }
 
 /**
+ * Download a photo file from Telegram
+ */
+export async function downloadPhotoFile(fileId: string): Promise<{
+  buffer: Buffer;
+  mimeType: string;
+  fileName: string;
+} | null> {
+  try {
+    const file = await bot.getFile(fileId);
+    if (!file.file_path) return null;
+
+    const fileUrl = `https://api.telegram.org/file/bot${config.telegramBotToken}/${file.file_path}`;
+    const response = await fetch(fileUrl);
+
+    if (!response.ok) {
+      throw new Error(`Failed to download photo: ${response.statusText}`);
+    }
+
+    const arrayBuffer = await response.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+
+    // Extract extension from file_path (e.g., "photos/file_123.jpg")
+    const ext = file.file_path.split('.').pop()?.toLowerCase() || 'jpg';
+    const mimeType = ext === 'png' ? 'image/png' : ext === 'gif' ? 'image/gif' : ext === 'webp' ? 'image/webp' : 'image/jpeg';
+    const fileName = `telegram_${Date.now()}.${ext}`;
+
+    return { buffer, mimeType, fileName };
+  } catch (error) {
+    console.error('Error downloading photo file:', error);
+    return null;
+  }
+}
+
+/**
  * Set up webhook for production
  */
 export async function setWebhook(url: string): Promise<boolean> {
