@@ -9,7 +9,9 @@ import type {
   GeneratedNote,
   SourceReference,
   SearchResult,
+  VideoAnalysis,
 } from '../types/research.js';
+import { formatMultipleVideoAnalysesForNote } from './youtubeAnalysis.js';
 
 const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
 const MODEL = 'z-ai/glm-4.5-air:free';
@@ -75,16 +77,49 @@ ${r.content.slice(0, 2000)}
 }
 
 /**
+ * Format video analyses for LLM prompt context
+ */
+function formatVideoInsightsForPrompt(videoAnalyses: VideoAnalysis[]): string {
+  const successfulAnalyses = videoAnalyses.filter(v => !v.error);
+  if (successfulAnalyses.length === 0) return '';
+
+  return successfulAnalyses.map((v, i) => `
+=== YouTube Video ${i + 1} ===
+URL: ${v.videoUrl}
+Summary: ${v.summary}
+Key Points: ${v.keyPoints.join('; ')}
+Topics: ${v.topics.join(', ')}
+`).join('\n');
+}
+
+/**
  * Synthesize research results into a structured note
  */
 export async function synthesizeResearchNote(
   taskName: string,
   researchData: ResearchData,
-  focusAreas: string[] = []
+  focusAreas: string[] = [],
+  videoAnalyses?: VideoAnalysis[]
 ): Promise<GeneratedNote> {
   const sourcesText = formatSourcesForContext(researchData.results);
   const focusText =
     focusAreas.length > 0 ? `Focus Areas: ${focusAreas.join(', ')}` : '';
+
+  // Format video insights if available
+  const hasVideoInsights = videoAnalyses && videoAnalyses.length > 0 && videoAnalyses.some(v => !v.error);
+  const videoInsightsText = hasVideoInsights
+    ? formatVideoInsightsForPrompt(videoAnalyses!)
+    : '';
+
+  // Build dynamic system prompt based on whether video insights are available
+  const videoInsightsSection = hasVideoInsights ? `
+## 📹 Video Insights
+[If YouTube video analysis is provided, summarize the key learnings from the video(s)]
+• **[Key Takeaway 1]** — [Brief explanation]
+• **[Key Takeaway 2]** — [Brief explanation]
+• **[Key Takeaway 3]** — [Brief explanation]
+(Integrate video insights with web research - note where they align or add unique perspectives)
+` : '';
 
   const systemPrompt = `You are an expert research analyst creating a CONCISE research brief. Your output must be scannable, actionable, and under ${MAX_WORDS} words.
 
@@ -98,7 +133,7 @@ STRICT OUTPUT FORMAT (use these exact section headers):
 • **[Number/Stat]** — [What it means in context]
 • **[Number/Stat]** — [What it means in context]
 (Include 3-4 most impactful statistics or numbers from the research)
-
+${videoInsightsSection}
 ## 💡 Top Insights
 
 ### 1. [Insight Title]
@@ -125,18 +160,28 @@ RULES:
 4. Use specific numbers and data points
 5. Make it actionable - what should the reader DO?
 6. Write for a busy professional who needs quick insights
-7. Use inline citations [1], [2], [3] to reference sources`;
+7. Use inline citations [1], [2], [3] to reference sources${hasVideoInsights ? '\n8. INCLUDE the Video Insights section with key takeaways from the YouTube video(s)' : ''}`;
+
+  // Build user prompt with optional video insights
+  const videoSection = hasVideoInsights ? `
+
+YOUTUBE VIDEO ANALYSIS:
+${videoInsightsText}
+` : '';
 
   const userPrompt = `RESEARCH TOPIC: "${taskName}"
 ${focusText}
 
 SOURCES (${researchData.results.length} total):
 ${sourcesText}
-
-Create a concise research brief following the exact format specified. Remember: MAXIMUM ${MAX_WORDS} words, focus on actionable insights.`;
+${videoSection}
+Create a concise research brief following the exact format specified.${hasVideoInsights ? ' IMPORTANT: Include the Video Insights section with key takeaways from the YouTube video analysis.' : ''} Remember: MAXIMUM ${MAX_WORDS} words, focus on actionable insights.`;
 
   try {
     console.log(`📝 Synthesizing note for: "${taskName}"`);
+    if (hasVideoInsights) {
+      console.log(`🎬 Including ${videoAnalyses!.filter(v => !v.error).length} video insight(s) in note`);
+    }
 
     const content = await callOpenRouter([
       { role: 'system', content: systemPrompt },

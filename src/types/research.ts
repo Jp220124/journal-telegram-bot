@@ -139,6 +139,24 @@ export interface ResearchData {
 }
 
 // ============================================================================
+// Video Analysis (YouTube)
+// ============================================================================
+
+export interface VideoAnalysis {
+  videoUrl: string;
+  videoId: string;
+  summary: string;
+  keyPoints: string[];
+  topics: string[];
+  timestamps: Array<{
+    time: string;
+    description: string;
+  }>;
+  analyzedAt: string;
+  error?: string;
+}
+
+// ============================================================================
 // Generated Note
 // ============================================================================
 
@@ -175,6 +193,9 @@ export interface ResearchJobData {
   researchData?: ResearchData;
   generatedNote?: GeneratedNote;
   noteId?: string;
+
+  // Video analysis (YouTube)
+  videoAnalyses?: VideoAnalysis[];
 }
 
 export interface ResearchJobResult {

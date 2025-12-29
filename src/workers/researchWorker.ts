@@ -27,6 +27,12 @@ import {
   updateTelegramConversation,
 } from '../services/researchDatabase.js';
 import { sendMessage } from '../services/telegram.js';
+import {
+  extractYouTubeUrls,
+  analyzeMultipleVideos,
+  isYouTubeAnalysisAvailable,
+  type VideoAnalysis,
+} from '../services/youtubeAnalysis.js';
 
 // Queue name (must match researchQueue.ts)
 const QUEUE_NAME = 'research-automation';
@@ -168,11 +174,13 @@ async function processResearchJob(
     stage: resumeStage,
     understanding: existingUnderstanding,
     researchData: existingResearchData,
+    videoAnalyses: existingVideoAnalyses,
   } = job.data;
 
   let stage = resumeStage || ResearchStage.UNDERSTAND;
   let understanding: TaskUnderstanding | undefined = existingUnderstanding;
   let researchData: ResearchData | undefined = existingResearchData;
+  let videoAnalyses: VideoAnalysis[] | undefined = existingVideoAnalyses;
   let generatedNote: GeneratedNote | undefined;
   let noteId: string | undefined;
 
@@ -214,6 +222,32 @@ async function processResearchJob(
             focus_areas: understanding.suggestedFocusAreas,
             search_queries: understanding.searchQueries,
           });
+
+          // ========================================
+          // YouTube Video Analysis (if URLs detected)
+          // ========================================
+          const textToSearch = `${taskName} ${taskDescription || ''}`;
+          const youtubeUrls = extractYouTubeUrls(textToSearch);
+
+          if (youtubeUrls.length > 0 && isYouTubeAnalysisAvailable()) {
+            console.log(`🎬 Detected ${youtubeUrls.length} YouTube URL(s), analyzing...`);
+
+            try {
+              // Analyze videos (max 3 to stay within API limits)
+              const urlsToAnalyze = youtubeUrls.slice(0, 3);
+              videoAnalyses = await analyzeMultipleVideos(urlsToAnalyze);
+
+              const successCount = videoAnalyses.filter(v => !v.error).length;
+              console.log(`✅ Analyzed ${successCount}/${urlsToAnalyze.length} videos successfully`);
+
+              // Note: Video analyses will be passed to SYNTHESIZE stage
+            } catch (videoError) {
+              console.error(`⚠️ Video analysis failed (continuing without):`, videoError);
+              // Don't fail the job - video analysis is optional
+            }
+          } else if (youtubeUrls.length > 0) {
+            console.log(`⚠️ YouTube URLs found but Gemini API not configured, skipping video analysis`);
+          }
 
           // Check if clarification is needed
           if (understanding.needsClarification && automationConfig.ask_clarification) {
@@ -326,17 +360,19 @@ async function processResearchJob(
         case ResearchStage.SYNTHESIZE: {
           console.log(`📝 Stage 4: Synthesizing research note`);
           console.log(`   📊 Research data sources: ${researchData?.results?.length || 0}`);
+          console.log(`   🎬 Video analyses: ${videoAnalyses?.length || 0}`);
 
           if (!researchData) {
             throw new Error('No research data for synthesis');
           }
 
-          // Generate the note
+          // Generate the note (with optional video insights)
           console.log(`   🧠 Generating note with LLM...`);
           generatedNote = await synthesizeResearchNote(
             taskName,
             researchData,
-            understanding?.suggestedFocusAreas || []
+            understanding?.suggestedFocusAreas || [],
+            videoAnalyses
           );
           console.log(`   ✅ Note generated: "${generatedNote.title}" (${generatedNote.content.length} chars)`);
 
