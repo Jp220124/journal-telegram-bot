@@ -706,21 +706,29 @@ async function callAI(
   messages: OpenRouterMessage[],
   tools?: ReturnType<typeof buildIntentTools>
 ): Promise<OpenRouterResponse> {
+  // Log which API will be used
+  const hasGemini = Boolean(config.geminiApiKey);
+  const hasOpenRouter = Boolean(config.openRouterApiKey);
+  console.log(`[AI Config] Gemini: ${hasGemini ? 'YES' : 'NO'}, OpenRouter: ${hasOpenRouter ? 'YES' : 'NO'}`);
+
   // Prefer Gemini API if configured
   if (config.geminiApiKey) {
     try {
+      console.log('[AI] Using Gemini API');
       return await callGemini(messages, tools);
     } catch (error) {
-      console.error('Gemini API error, falling back to OpenRouter:', error);
+      console.error('[AI] Gemini API error, falling back to OpenRouter:', error);
       // Fall through to OpenRouter
     }
   }
 
   // Fallback to OpenRouter
   if (config.openRouterApiKey) {
+    console.log('[AI] Using OpenRouter API');
     return await callOpenRouter(messages, tools);
   }
 
+  console.error('[AI] No API keys configured!');
   throw new Error('No AI API configured. Please set GEMINI_API_KEY or OPENROUTER_API_KEY.');
 }
 
