@@ -1,6 +1,7 @@
 /**
  * Note Synthesis Service
  * Generates structured research notes from search results using LLM
+ * Uses Gemini API (primary) or OpenRouter (fallback)
  */
 
 import { config } from '../config/env.js';
@@ -13,22 +14,81 @@ import type {
 } from '../types/research.js';
 import { formatMultipleVideoAnalysesForNote } from './youtubeAnalysis.js';
 
+// Gemini API
+const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
+
+// OpenRouter fallback
 const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
-const MODEL = 'z-ai/glm-4.5-air:free';
+const OPENROUTER_MODEL = 'z-ai/glm-4.5-air:free';
 
 // Research brief word limits
 const MAX_WORDS = 500;
 const MAX_TOKENS = 1500;
 
-interface OpenRouterMessage {
+interface LLMMessage {
   role: 'system' | 'user' | 'assistant';
   content: string;
 }
 
 /**
- * Call OpenRouter API for note generation
+ * Call Gemini API for note generation
  */
-async function callOpenRouter(messages: OpenRouterMessage[]): Promise<string> {
+async function callGemini(messages: LLMMessage[]): Promise<string> {
+  if (!config.geminiApiKey) {
+    throw new Error('Gemini API key not configured');
+  }
+
+  // Separate system message and user messages
+  const systemMessage = messages.find(m => m.role === 'system');
+  const userMessages = messages.filter(m => m.role !== 'system');
+
+  const contents = userMessages.map(msg => ({
+    role: msg.role === 'user' ? 'user' : 'model',
+    parts: [{ text: msg.content }],
+  }));
+
+  const body: Record<string, unknown> = {
+    contents,
+    generationConfig: {
+      temperature: 0.7,
+      maxOutputTokens: MAX_TOKENS,
+    },
+  };
+
+  if (systemMessage) {
+    body.systemInstruction = {
+      parts: [{ text: systemMessage.content }],
+    };
+  }
+
+  const response = await fetch(`${GEMINI_API_URL}?key=${config.geminiApiKey}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+    const error = await response.text();
+    throw new Error(`Gemini API error: ${response.status} - ${error}`);
+  }
+
+  const data = await response.json() as {
+    candidates?: Array<{
+      content?: { parts?: Array<{ text?: string }> };
+    }>;
+  };
+
+  return data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+}
+
+/**
+ * Call OpenRouter API for note generation (fallback)
+ */
+async function callOpenRouter(messages: LLMMessage[]): Promise<string> {
+  if (!config.openRouterApiKey) {
+    throw new Error('OpenRouter API key not configured');
+  }
+
   const response = await fetch(OPENROUTER_API_URL, {
     method: 'POST',
     headers: {
@@ -38,10 +98,10 @@ async function callOpenRouter(messages: OpenRouterMessage[]): Promise<string> {
       'X-Title': 'Daily Journal Research Synthesis',
     },
     body: JSON.stringify({
-      model: MODEL,
+      model: OPENROUTER_MODEL,
       messages,
-      max_tokens: MAX_TOKENS, // Concise, focused output
-      temperature: 0.7, // Balanced creativity and accuracy
+      max_tokens: MAX_TOKENS,
+      temperature: 0.7,
     }),
   });
 
@@ -54,6 +114,34 @@ async function callOpenRouter(messages: OpenRouterMessage[]): Promise<string> {
     choices: Array<{ message: { content?: string } }>;
   };
   return data.choices[0]?.message?.content || '';
+}
+
+/**
+ * Call LLM for note synthesis - uses Gemini if available, falls back to OpenRouter
+ */
+async function callLLM(messages: LLMMessage[]): Promise<string> {
+  // Log which API will be used
+  const hasGemini = Boolean(config.geminiApiKey);
+  const hasOpenRouter = Boolean(config.openRouterApiKey);
+  console.log(`[Note Synthesis] API Config - Gemini: ${hasGemini ? 'YES' : 'NO'}, OpenRouter: ${hasOpenRouter ? 'YES' : 'NO'}`);
+
+  // Prefer Gemini
+  if (config.geminiApiKey) {
+    try {
+      console.log('[Note Synthesis] Using Gemini API');
+      return await callGemini(messages);
+    } catch (error) {
+      console.error('[Note Synthesis] Gemini failed, trying OpenRouter:', error);
+    }
+  }
+
+  // Fallback to OpenRouter
+  if (config.openRouterApiKey) {
+    console.log('[Note Synthesis] Using OpenRouter API');
+    return await callOpenRouter(messages);
+  }
+
+  throw new Error('No LLM API configured for note synthesis');
 }
 
 /**
@@ -183,7 +271,7 @@ Create a concise research brief following the exact format specified.${hasVideoI
       console.log(`🎬 Including ${videoAnalyses!.filter(v => !v.error).length} video insight(s) in note`);
     }
 
-    const content = await callOpenRouter([
+    const content = await callLLM([
       { role: 'system', content: systemPrompt },
       { role: 'user', content: userPrompt },
     ]);
@@ -389,7 +477,7 @@ ${sourcesContext}
 Create a detailed comparison note.`;
 
   try {
-    const content = await callOpenRouter([
+    const content = await callLLM([
       { role: 'system', content: systemPrompt },
       { role: 'user', content: userPrompt },
     ]);
