@@ -1,12 +1,17 @@
 /**
  * AI service for intent parsing and natural language understanding
- * Uses OpenRouter API with function calling for structured output
+ * Uses Google Gemini API with function calling for structured output
+ * Falls back to OpenRouter if Gemini is not configured
  */
 
 import { config } from '../config/env.js';
 
+// Google Gemini API
+const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
+
+// OpenRouter fallback
 const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
-const MODEL = 'z-ai/glm-4.5-air:free';
+const OPENROUTER_MODEL = 'google/gemini-2.0-flash-exp:free';
 
 // Default categories (fallback)
 const DEFAULT_CATEGORIES = ['Daily Recurring', 'One-Time Tasks', 'Work', 'Personal'];
@@ -528,15 +533,145 @@ interface OpenRouterResponse {
   }>;
 }
 
+// Gemini API types
+interface GeminiContent {
+  role: 'user' | 'model';
+  parts: Array<{ text: string }>;
+}
+
+interface GeminiFunctionDeclaration {
+  name: string;
+  description: string;
+  parameters: Record<string, unknown>;
+}
+
+interface GeminiResponse {
+  candidates: Array<{
+    content: {
+      parts: Array<{
+        text?: string;
+        functionCall?: {
+          name: string;
+          args: Record<string, unknown>;
+        };
+      }>;
+    };
+  }>;
+}
+
 /**
- * Make a request to OpenRouter API
+ * Convert OpenAI-style tools to Gemini function declarations
+ */
+function convertToolsToGemini(tools: ReturnType<typeof buildIntentTools>): GeminiFunctionDeclaration[] {
+  return tools.map(tool => ({
+    name: tool.function.name,
+    description: tool.function.description,
+    parameters: tool.function.parameters,
+  }));
+}
+
+/**
+ * Make a request to Google Gemini API
+ */
+async function callGemini(
+  messages: OpenRouterMessage[],
+  tools?: ReturnType<typeof buildIntentTools>
+): Promise<OpenRouterResponse> {
+  // Convert messages to Gemini format
+  // Gemini expects system instruction separately
+  const systemMessage = messages.find(m => m.role === 'system');
+  const chatMessages = messages.filter(m => m.role !== 'system');
+
+  const contents: GeminiContent[] = chatMessages.map(msg => ({
+    role: msg.role === 'user' ? 'user' : 'model',
+    parts: [{ text: msg.content }],
+  }));
+
+  const body: Record<string, unknown> = {
+    contents,
+    generationConfig: {
+      temperature: 0.1,
+      maxOutputTokens: 1024,
+    },
+  };
+
+  // Add system instruction
+  if (systemMessage) {
+    body.systemInstruction = {
+      parts: [{ text: systemMessage.content }],
+    };
+  }
+
+  // Add tools if provided
+  if (tools) {
+    body.tools = [{
+      functionDeclarations: convertToolsToGemini(tools),
+    }];
+    body.toolConfig = {
+      functionCallingConfig: {
+        mode: 'AUTO',
+      },
+    };
+  }
+
+  const response = await fetch(`${GEMINI_API_URL}?key=${config.geminiApiKey}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+    const error = await response.text();
+    throw new Error(`Gemini API error: ${response.status} - ${error}`);
+  }
+
+  const geminiResponse = await response.json() as GeminiResponse;
+
+  // Convert Gemini response to OpenRouter format for compatibility
+  const candidate = geminiResponse.candidates?.[0];
+  if (!candidate) {
+    return { choices: [] };
+  }
+
+  const parts = candidate.content?.parts || [];
+  const functionCallPart = parts.find(p => p.functionCall);
+  const textPart = parts.find(p => p.text);
+
+  if (functionCallPart?.functionCall) {
+    return {
+      choices: [{
+        message: {
+          tool_calls: [{
+            function: {
+              name: functionCallPart.functionCall.name,
+              arguments: JSON.stringify(functionCallPart.functionCall.args),
+            },
+          }],
+        },
+      }],
+    };
+  }
+
+  return {
+    choices: [{
+      message: {
+        content: textPart?.text || '',
+      },
+    }],
+  };
+}
+
+/**
+ * Make a request to OpenRouter API (fallback)
  */
 async function callOpenRouter(
   messages: OpenRouterMessage[],
   tools?: ReturnType<typeof buildIntentTools>
 ): Promise<OpenRouterResponse> {
   const body: Record<string, unknown> = {
-    model: MODEL,
+    model: OPENROUTER_MODEL,
     messages,
   };
 
@@ -562,6 +697,31 @@ async function callOpenRouter(
   }
 
   return response.json() as Promise<OpenRouterResponse>;
+}
+
+/**
+ * Call the AI API - uses Gemini if available, falls back to OpenRouter
+ */
+async function callAI(
+  messages: OpenRouterMessage[],
+  tools?: ReturnType<typeof buildIntentTools>
+): Promise<OpenRouterResponse> {
+  // Prefer Gemini API if configured
+  if (config.geminiApiKey) {
+    try {
+      return await callGemini(messages, tools);
+    } catch (error) {
+      console.error('Gemini API error, falling back to OpenRouter:', error);
+      // Fall through to OpenRouter
+    }
+  }
+
+  // Fallback to OpenRouter
+  if (config.openRouterApiKey) {
+    return await callOpenRouter(messages, tools);
+  }
+
+  throw new Error('No AI API configured. Please set GEMINI_API_KEY or OPENROUTER_API_KEY.');
 }
 
 /**
@@ -653,7 +813,7 @@ Analyze the user's CURRENT message and call the most appropriate function.`;
     // Add current user message
     messages.push({ role: 'user', content: userMessage });
 
-    const response = await callOpenRouter(messages, tools);
+    const response = await callAI(messages, tools);
     const choice = response.choices[0];
 
     // Check for function call
@@ -774,7 +934,7 @@ export async function generateResponse(prompt: string): Promise<string> {
       { role: 'user', content: prompt },
     ];
 
-    const response = await callOpenRouter(messages); // No tools = no function calling
+    const response = await callAI(messages); // No tools = no function calling
     return response.choices[0]?.message?.content || "Sorry, I couldn't generate a response right now.";
   } catch (error) {
     console.error('Error generating response:', error);
